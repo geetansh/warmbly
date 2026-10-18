@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/rs/zerolog/log"
 
 	"github.com/warmbly/warmbly/internal/errx"
 	"github.com/warmbly/warmbly/internal/jobrun"
@@ -20,8 +21,16 @@ func (s *JobsService) StartWarmupFilingRecovery(ctx context.Context) {
 	jobrun.Loop(ctx, "warmup_filing_recovery", time.Minute, true, func(ctx context.Context) error {
 		ctx, cancel := context.WithTimeout(ctx, 45*time.Second)
 		defer cancel()
-		return errors.Join(s.retryWarmupFilings(ctx), s.WarmupRecoveryRepo.PurgeExpiredIdentifiers(ctx))
+		return s.recoverWarmupFilings(ctx)
 	})
+}
+
+func (s *JobsService) recoverWarmupFilings(ctx context.Context) error {
+	dropped, dropErr := s.WarmupRecoveryRepo.DropCloudFilings(ctx)
+	if dropped > 0 {
+		log.Info().Int64("dropped", dropped).Msg("warmup filing recovery: dropped filings for Cloud-warmed mailboxes")
+	}
+	return errors.Join(dropErr, s.retryWarmupFilings(ctx), s.WarmupRecoveryRepo.PurgeExpiredIdentifiers(ctx))
 }
 
 func (s *JobsService) retryWarmupFilings(ctx context.Context) error {
