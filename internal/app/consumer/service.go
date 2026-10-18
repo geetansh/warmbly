@@ -24,6 +24,8 @@ import (
 // CloudLinkVerifier is the self-hosted pool link as the consumer sees it.
 type CloudLinkVerifier interface {
 	CheckEnrollment(ctx context.Context, accountID uuid.UUID) (bool, error)
+	// FilesWarmupMail is whether Warmbly Cloud holds an active enrollment for the mailbox and so files the warmup it sends it.
+	FilesWarmupMail(ctx context.Context, accountID uuid.UUID) (bool, error)
 	VerifyWarmupToken(ctx context.Context, accountID uuid.UUID, token string) (bool, error)
 	IsCloudWarmupDelivery(ctx context.Context, accountID uuid.UUID, sender, messageID, subject string) (bool, error)
 	IsCloudWarmupThreadReply(ctx context.Context, accountID uuid.UUID, messageID string, inReplyTo []string) (bool, error)
