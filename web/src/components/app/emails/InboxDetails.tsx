@@ -47,8 +47,10 @@ import {
     TrashIcon,
     PowerIcon,
     PowerOffIcon,
+    CloudIcon,
     type LucideIcon,
 } from "lucide-react";
+import { relativeTime } from "@/lib/unibox/messageDetails";
 import useMailboxSwitch from "@/components/app/emails/useMailboxSwitch";
 import toast from "react-hot-toast/headless";
 
@@ -100,6 +102,7 @@ import SyncStatusCard from "./SyncStatusCard";
 import CloudWarmupCard from "./CloudWarmupCard";
 import WarmupPartnerDiversity from "./WarmupPartnerDiversity";
 import useCloudPool from "@/hooks/useCloudPool";
+import { cloudOwnedWarmupFields } from "@/lib/cloudWarmup";
 import useAuthConfig from "@/lib/api/hooks/auth/useAuthConfig";
 import { Toggle } from "@/components/app/campaigns/preferences/components/CampaignPreferenceBoolBox";
 import setDirectTracking from "@/lib/api/client/app/emails/setDirectTracking";
@@ -300,14 +303,14 @@ function FieldShell({ label, hint, children }: { label: string; hint?: string; c
     );
 }
 
-function NumField({ value, onChange, suffix, max }: { value: number; onChange: (v: number) => void; suffix?: string; max?: number }) {
+function NumField({ value, onChange, suffix, min = 0, max }: { value: number; onChange: (v: number) => void; suffix?: string; min?: number; max?: number }) {
     // Themed number field with our own steppers, no native spinner.
     return (
         <NumberInput
             value={value}
             onChange={onChange}
             suffix={suffix}
-            min={0}
+            min={min}
             max={max}
             align="right"
             className="w-full h-9"
@@ -417,7 +420,28 @@ function Detail({ mailbox, onClose, initialTab, tabIntentKey, onTabIntentConsume
         }
     }, [initialTab, tabIntentKey, onTabIntentConsumed, setTab]);
     const [form, setForm] = useState<Inbox>(mailbox);
-    const update = (patch: Partial<Inbox>) => setForm((f) => ({ ...f, ...patch }));
+    // Fields the user has edited since the last save; a refresh never overwrites them.
+    const touched = React.useRef(new Set<keyof Inbox>());
+    const update = (patch: Partial<Inbox>) => {
+        for (const k of Object.keys(patch)) touched.current.add(k as keyof Inbox);
+        setForm((f) => ({ ...f, ...patch }));
+    };
+    // A refetch carries newer values into the untouched fields, so Save never writes an older one back.
+    React.useEffect(() => {
+        setForm((f) => {
+            let next: Record<string, unknown> | null = null;
+            for (const k of EDITABLE) {
+                if (touched.current.has(k) || JSON.stringify(f[k]) === JSON.stringify(mailbox[k])) continue;
+                next ??= { ...f };
+                next[k] = mailbox[k];
+            }
+            return next ? (next as unknown as Inbox) : f;
+        });
+    }, [mailbox]);
+    const discard = () => {
+        touched.current.clear();
+        setForm(mailbox);
+    };
 
     usePresenceResource(mailbox.id ? `mailbox:${mailbox.id}` : null, "editing");
 
@@ -430,7 +454,8 @@ function Detail({ mailbox, onClose, initialTab, tabIntentKey, onTabIntentConsume
         return { from: fmt(start), to: fmt(end) };
     }, []);
     const warmup = useWarmupAnalytics(mailbox.id, from, to);
-    const mutation = useUpdateEmail(mailbox.id);
+    const pool = useCloudPool();
+    const mutation = useUpdateEmail(mailbox.id, pool.connected && pool.isEnrolled(mailbox.id) ? cloudOwnedWarmupFields : undefined);
 
     const dirty = useMemo(
         () => EDITABLE.some((k) => JSON.stringify(form[k]) !== JSON.stringify(mailbox[k])),
@@ -445,7 +470,16 @@ function Detail({ mailbox, onClose, initialTab, tabIntentKey, onTabIntentConsume
             }
         }
         try {
-            await mutation.mutateAsync(patch);
+            const saved = await mutation.mutateAsync(patch);
+            // The answer is what was stored (for a Cloud mailbox, what Warmbly Cloud applied).
+            setForm((f) => {
+                const next = { ...f } as Record<string, unknown>;
+                for (const k of Object.keys(patch) as (keyof Inbox)[]) {
+                    touched.current.delete(k);
+                    next[k] = saved[k];
+                }
+                return next as unknown as Inbox;
+            });
             toast.success("Mailbox updated");
         } catch (e) {
             toast.error(buildError(e as AppError));
@@ -545,7 +579,7 @@ function Detail({ mailbox, onClose, initialTab, tabIntentKey, onTabIntentConsume
                     >
                         <span className="text-[11.5px] text-slate-500">Unsaved changes</span>
                         <div className="ml-auto flex items-center gap-2">
-                            <button onClick={() => setForm(mailbox)} className="h-8 px-3 rounded-md border border-slate-200 hover:border-slate-300 text-[12px] text-slate-700 hover:text-slate-900 transition-colors">
+                            <button onClick={discard} className="h-8 px-3 rounded-md border border-slate-200 hover:border-slate-300 text-[12px] text-slate-700 hover:text-slate-900 transition-colors">
                                 Discard
                             </button>
                             <button onClick={save} disabled={mutation.isPending} className="h-8 px-3.5 rounded-md bg-sky-600 hover:bg-sky-700 text-white text-[12px] font-medium inline-flex items-center gap-1.5 transition-colors disabled:opacity-60">
@@ -1263,6 +1297,9 @@ function WarmupTab({ form, update, status, mailbox, canWarmup = true }: { form: 
     // When Warmbly Cloud warms this mailbox the local controls step aside.
     const pool = useCloudPool();
     const inCloud = pool.connected && pool.isEnrolled(mailbox.id);
+    const cloudRow = inCloud ? pool.rowFor(mailbox.id) : undefined;
+    // Warmbly Cloud skips a 0 sent from an instance, so the form does not offer one.
+    const cloudMin = inCloud ? 1 : 0;
 
     const run = (action: "start" | "pause" | "resume" | "stop", verb: string) => {
         const execute = () => life.mutate(action, {
@@ -1457,35 +1494,41 @@ function WarmupTab({ form, update, status, mailbox, canWarmup = true }: { form: 
             {/* Ramp configuration */}
             <div className="px-5 py-5 space-y-5">
                 <Eyebrow>Ramp configuration</Eyebrow>
+                {inCloud && <CloudSettingsNote syncedAt={cloudRow?.settings_observed_at} unavailable={pool.unavailable} />}
                 <FieldShell label="Starting volume" hint="Emails per day when warmup begins.">
-                    <NumField value={form.warmup_base} onChange={(v) => update({ warmup_base: v })} suffix="emails / day" />
+                    <NumField value={form.warmup_base} onChange={(v) => update({ warmup_base: v })} suffix="emails / day" min={cloudMin} />
                 </FieldShell>
                 <FieldShell label="Daily increase" hint="How many more emails to send each day as reputation builds.">
-                    <NumField value={form.warmup_increase} onChange={(v) => update({ warmup_increase: v })} suffix="+ / day" />
+                    <NumField value={form.warmup_increase} onChange={(v) => update({ warmup_increase: v })} suffix="+ / day" min={cloudMin} />
                 </FieldShell>
                 <FieldShell label="Maximum volume" hint="Ceiling the ramp grows toward. Keep conservative for new mailboxes (≈40/day).">
-                    <NumField value={form.warmup_max} onChange={(v) => update({ warmup_max: v })} suffix="emails / day" />
+                    <NumField value={form.warmup_max} onChange={(v) => update({ warmup_max: v })} suffix="emails / day" min={cloudMin} />
                 </FieldShell>
                 {baseOverMax && (
                     <p className="text-[11px] text-rose-600 -mt-3">Starting volume can't exceed the maximum.</p>
                 )}
                 <FieldShell label="Reply rate" hint="Share of warmup mail that gets a reply, to mimic real conversation.">
-                    <NumField value={form.warmup_reply_rate} onChange={(v) => update({ warmup_reply_rate: v })} suffix="%" />
+                    <NumField value={form.warmup_reply_rate} onChange={(v) => update({ warmup_reply_rate: v })} suffix="%" min={cloudMin} />
                 </FieldShell>
-                <FieldShell label="Content segment" hint="Targets segment-specific warmup content (e.g. saas, agency). Leave empty for generic content.">
-                    <TextInput
-                        value={form.warmup_tag ?? ""}
-                        placeholder="e.g. saas, agency"
-                        onChange={(v) => update({ warmup_tag: v.toLowerCase().replace(/[^a-z0-9-]/g, "") })}
-                        className="w-full h-9"
-                    />
-                </FieldShell>
+                {/* Warmbly Cloud writes its own content, so the segment only applies to warmup sent from here. */}
+                {!inCloud && (
+                    <FieldShell label="Content segment" hint="Targets segment-specific warmup content (e.g. saas, agency). Leave empty for generic content.">
+                        <TextInput
+                            value={form.warmup_tag ?? ""}
+                            placeholder="e.g. saas, agency"
+                            onChange={(v) => update({ warmup_tag: v.toLowerCase().replace(/[^a-z0-9-]/g, "") })}
+                            className="w-full h-9"
+                        />
+                    </FieldShell>
+                )}
             </div>
 
-            {/* Where warmup mail lands in the real mail client */}
-            <div className="px-5 py-5 space-y-4">
-                <WarmupPlacementFields form={form} update={update} provider={mailbox.provider} />
-            </div>
+            {/* Where warmup mail lands in the real mail client; Warmbly Cloud files the mail it warms itself. */}
+            {!inCloud && (
+                <div className="px-5 py-5 space-y-4">
+                    <WarmupPlacementFields form={form} update={update} provider={mailbox.provider} />
+                </div>
+            )}
 
             {/* Schedule */}
             <div className="px-5 py-5 space-y-5">
@@ -1508,6 +1551,21 @@ function WarmupTab({ form, update, status, mailbox, canWarmup = true }: { form: 
                     </div>
                 </FieldShell>
             </div>
+        </div>
+    );
+}
+
+/* ── Warmbly Cloud owns the ramp and window of a mailbox it warms ─────── */
+function CloudSettingsNote({ syncedAt, unavailable }: { syncedAt?: Date | null; unavailable: boolean }) {
+    const synced = syncedAt ? relativeTime(new Date(syncedAt)) : "";
+    return (
+        <div className="rounded-md border border-sky-100 bg-sky-50/70 px-3 py-2.5 flex gap-2.5">
+            <CloudIcon className="w-4 h-4 text-sky-600 shrink-0 mt-0.5" />
+            <p className="text-[11.5px] text-sky-900/90 leading-relaxed">
+                <b>Managed by Warmbly Cloud</b>{synced && <> · synced {synced}</>}. Saving sends these values to Warmbly Cloud,
+                and changes made there show up here.
+                {unavailable && <> Warmbly Cloud can't be reached right now, so they may be out of date and can't be saved.</>}
+            </p>
         </div>
     );
 }

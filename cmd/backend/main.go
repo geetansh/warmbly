@@ -1331,6 +1331,21 @@ func main() {
 		// Deleting a mailbox must also revoke its cloud-held credential.
 		emailService.WireCloudUnenroll(cloudLinkService)
 		emailService.WireCloudCredentials(cloudLinkService)
+		// Warmup edits for Cloud-warmed mailboxes go to Warmbly Cloud, which owns them.
+		emailService.WireCloudWarmup(cloudLinkService)
+		cloudLinkService.OnSettingsChange(func(ctx context.Context, ids []uuid.UUID) {
+			for _, id := range ids {
+				acc, xerr := emailRepostory.GetByID(ctx, id)
+				if xerr != nil || acc == nil {
+					continue
+				}
+				orgID := ""
+				if acc.OrganizationID != nil {
+					orgID = acc.OrganizationID.String()
+				}
+				streamingPublisher.PublishAccountSynced(ctx, orgID, acc.UserID, acc.ID.String(), acc.Email, acc.Provider, acc.Status)
+			}
+		})
 
 		rateLimitRepository := repository.NewRateLimitRepository(primaryDB)
 		rateLimitService = ratelimit.NewService(cache, rateLimitRepository)

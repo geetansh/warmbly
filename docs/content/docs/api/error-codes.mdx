@@ -187,6 +187,19 @@ Each registered key may make 30 protected calls per hour. Past that the call ans
 | `cloud_link_upgrade_required` | 409 | This Cloud deployment does not support workspace-scoped connections. Upgrade Cloud first |
 | `organization_cloud_connected` | 409 | Disconnect the workspace's Cloud connection before deleting it or scheduling deletion of it or its owner account |
 
+#### Warmbly Cloud warmup refusals
+
+A mailbox warmed by Warmbly Cloud has its warmup settings changed through the cloud (see [warmup settings](/guides/warmbly-cloud/#warmup-settings)). `PATCH /emails/:id` and the warmup start, pause and resume routes answer with these when that cannot happen. In every case nothing is saved on the instance. A replay with the same `Idempotency-Key` returns the stored answer, so retry with a new key.
+
+| `code` | Status | Meaning |
+|--------|--------|---------|
+| `cloud_warmup_value_unsupported` | 422 | Warmbly Cloud does not take 0 from an instance for the starting volume, maximum, daily increase or reply rate. Use 1 or more, or change it in Warmbly Cloud |
+| `cloud_warmup_not_applied` | 409 | Warmbly Cloud answered but did not apply the named settings. The mailbox now shows the values Warmbly Cloud reported |
+| `cloud_warmup_managed` | 409 | Participation, the shared daily and recipient limits, and stopping warmup are changed with the mailbox's Warmbly Cloud controls, not on the mailbox |
+| `cloud_link_disconnecting` | 409 | The workspace is disconnecting from Warmbly Cloud. Retry once it has finished |
+| `cloud_link_unreachable` | 503 | Warmbly Cloud could not be reached |
+| `cloud_link_bad_response` | 503 | Warmbly Cloud answered without the mailbox's warmup settings |
+
 #### Name refusals
 
 | `code` | Status | Meaning |

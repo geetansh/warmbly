@@ -134,6 +134,23 @@ type PoolLinkWarmupSettings struct {
 	Timezone  string `json:"timezone"`
 }
 
+// WarmupEveryDay is the weekday bitmask with all seven days set; locally 0 means the same.
+const WarmupEveryDay = 127
+
+// Reported is false for a settings block an older or broken cloud left empty.
+func (w PoolLinkWarmupSettings) Reported() bool {
+	return ClockHHMM(w.StartTime) != "" && ClockHHMM(w.EndTime) != ""
+}
+
+// Mirrored is the cloud's settings in the form this instance stores them.
+func (w PoolLinkWarmupSettings) Mirrored() PoolLinkWarmupSettings {
+	w.StartTime, w.EndTime = ClockHHMM(w.StartTime), ClockHHMM(w.EndTime)
+	if w.Days == WarmupEveryDay {
+		w.Days = 0
+	}
+	return w
+}
+
 // PoolLinkOAuthCredential carries a Gmail or Microsoft refresh grant.
 type PoolLinkOAuthCredential struct {
 	AccessToken  string    `json:"access_token"`
@@ -296,6 +313,8 @@ type CloudLinkMailbox struct {
 	Managed            bool       `json:"managed"`
 	EnrollmentState    string     `json:"enrollment_state,omitempty"`
 	StandingObservedAt *time.Time `json:"standing_observed_at,omitempty"`
+	// SettingsObservedAt is when the local warmup columns last mirrored the cloud's settings.
+	SettingsObservedAt *time.Time `json:"settings_observed_at,omitempty"`
 	// Standing is the warmup health the cloud last reported; nil until it has.
 	Standing *WarmupHealthInfo `json:"-"`
 }
@@ -342,6 +361,7 @@ type CloudLinkMailboxRow struct {
 	Cloud              *PoolLinkMailboxState `json:"cloud,omitempty"`
 	EnrollmentState    string                `json:"enrollment_state,omitempty"`
 	StandingObservedAt *time.Time            `json:"standing_observed_at,omitempty"`
+	SettingsObservedAt *time.Time            `json:"settings_observed_at,omitempty"`
 }
 
 // PoolLinkOffer is the warmup plan as an upgrade prompt sees it:
