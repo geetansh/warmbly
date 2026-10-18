@@ -188,7 +188,8 @@ func (r *cloudLinkRepository) Enroll(ctx context.Context, accountID, remoteID, i
 		SELECT ea.id, $2, $3, l.instance_id FROM email_accounts ea JOIN cloud_link l
 		  ON (l.organization_id = ea.organization_id OR l.organization_id IS NULL)
 		WHERE ea.id = $1 AND l.instance_id = $4 AND NOT l.disconnect_pending
-		ON CONFLICT (email_account_id) DO UPDATE SET remote_id = EXCLUDED.remote_id, managed = EXCLUDED.managed, enrollment_state = 'active'
+		ON CONFLICT (email_account_id) DO UPDATE SET remote_id = EXCLUDED.remote_id, managed = EXCLUDED.managed, enrollment_state = 'active',
+			enrollment_error_code = NULL, enrollment_error = NULL
 		WHERE cloud_link_mailboxes.enrollment_state <> 'pending_remove' AND cloud_link_mailboxes.instance_id = EXCLUDED.instance_id
 		RETURNING ` + cloudLinkMailboxColumns
 	m, err := scanCloudLinkMailbox(r.db.QueryRow(ctx, query, accountID, remoteID, managed, instanceID))
@@ -254,16 +255,20 @@ func (r *cloudLinkRepository) IsEnrolled(ctx context.Context, accountID uuid.UUI
 
 const cloudLinkMailboxColumns = `email_account_id, remote_id, enrolled_at, managed,
 	health_state, health_pool_type, health_reason, health_score, blocked_until, health_evaluated_at, instance_id,
-	enrollment_state, standing_observed_at`
+	enrollment_state, standing_observed_at, enrollment_error_code, enrollment_error`
 
 func scanCloudLinkMailbox(row pgx.Row) (*models.CloudLinkMailbox, error) {
 	var m models.CloudLinkMailbox
 	var state, poolType, reason *string
 	var score float64
 	var blockedUntil, evaluatedAt *time.Time
+	var errorCode, errorMessage *string
 	if err := row.Scan(&m.EmailAccountID, &m.RemoteID, &m.EnrolledAt, &m.Managed,
-		&state, &poolType, &reason, &score, &blockedUntil, &evaluatedAt, &m.InstanceID, &m.EnrollmentState, &m.StandingObservedAt); err != nil {
+		&state, &poolType, &reason, &score, &blockedUntil, &evaluatedAt, &m.InstanceID, &m.EnrollmentState, &m.StandingObservedAt, &errorCode, &errorMessage); err != nil {
 		return nil, err
+	}
+	if errorCode != nil && errorMessage != nil {
+		m.EnrollmentError = &models.CloudLinkEnrollmentError{Code: *errorCode, Message: *errorMessage}
 	}
 	if state != nil {
 		m.Standing = &models.WarmupHealthInfo{

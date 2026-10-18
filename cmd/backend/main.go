@@ -1332,6 +1332,12 @@ func main() {
 		// Deleting a mailbox must also revoke its cloud-held credential.
 		emailService.WireCloudUnenroll(cloudLinkService)
 		emailService.WireCloudCredentials(cloudLinkService)
+		// A refusal kept or cleared here also reaches teammates' open dashboards.
+		cloudLinkService.OnEnrollmentRefusalChange(func(ctx context.Context, id uuid.UUID) {
+			if acc, xerr := emailRepostory.GetByID(ctx, id); xerr == nil && acc != nil && acc.OrganizationID != nil {
+				streamingPublisher.PublishAccountSynced(ctx, acc.OrganizationID.String(), acc.UserID, acc.ID.String(), acc.Email, acc.Provider, acc.Status)
+			}
+		})
 
 		rateLimitRepository := repository.NewRateLimitRepository(primaryDB)
 		rateLimitService = ratelimit.NewService(cache, rateLimitRepository)

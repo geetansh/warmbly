@@ -94,7 +94,13 @@ export default function MailboxTable() {
                                                 {providerLabel(row.provider)}
                                                 {row.managed && " · signed in through Warmbly Cloud"}
                                                 {!supported && " · signed in with this instance's own OAuth app; add it again through Warmbly Cloud to warm it"}
-                                                {row.enrolled && !cloud && " · waiting for the cloud"}
+                                                {row.enrolled && !cloud && !row.enrollment_error && " · waiting for the cloud"}
+                                                {row.enrolled && row.enrollment_error && (
+                                                    <span className="inline-flex items-center gap-1 text-amber-700 ml-1" title={row.enrollment_error.message}>
+                                                        <AlertTriangleIcon className="w-3 h-3" />
+                                                        {cloud ? "Update not accepted" : "Not accepted"}: {row.enrollment_error.message}
+                                                    </span>
+                                                )}
                                                 {cloud?.errors && cloud.errors.length > 0 && (
                                                     <span className="inline-flex items-center gap-1 text-amber-700 ml-1">
                                                         <AlertTriangleIcon className="w-3 h-3" />
