@@ -43,6 +43,11 @@ func (r backfillEmailRepo) GetByID(context.Context, uuid.UUID) (*models.Email, *
 	return r.account, r.err
 }
 
+// knownLeak recognises leakedWarmup by its Message-ID locally, with no Cloud involved.
+func knownLeak() *warmupReportRepo {
+	return &warmupReportRepo{warmup: map[string]bool{"<leak@test.local>": true}}
+}
+
 func leakedWarmup() (models.JobEventNewEmail, *warmupCleanupInbox) {
 	e := models.JobEventNewEmail{UserID: uuid.New(), Message: &models.EmailMessageStoreData{
 		ID: uuid.New(), EmailID: uuid.New(), MessageID: "<leak@test.local>",
@@ -61,7 +66,7 @@ func TestCleanupFilesTheLeakOutOfTheCustomersOwnMailbox(t *testing.T) {
 	pub := &backfillPublisher{}
 	s := &JobsService{
 		UniboxRepository: inbox,
-		CloudLink:        &warmupInboxCloud{deliveryOK: true},
+		WarmupRepo:       knownLeak(),
 		Publisher:        pub,
 		EmailRepository: backfillEmailRepo{account: &models.Email{
 			ID: e.Message.EmailID, WorkerID: &worker,
@@ -105,7 +110,7 @@ func TestCleanupLeavesWarmupAloneWhenTheOwnerAskedForInbox(t *testing.T) {
 	pub := &backfillPublisher{}
 	s := &JobsService{
 		UniboxRepository: inbox,
-		CloudLink:        &warmupInboxCloud{deliveryOK: true},
+		WarmupRepo:       knownLeak(),
 		Publisher:        pub,
 		EmailRepository: backfillEmailRepo{account: &models.Email{
 			ID: e.Message.EmailID, WorkerID: &worker,
@@ -134,7 +139,7 @@ func TestCleanupKeepsTheRowWhenPublishingFails(t *testing.T) {
 	pub := &backfillPublisher{err: errors.New("schema registry request failed")}
 	s := &JobsService{
 		UniboxRepository: inbox,
-		CloudLink:        &warmupInboxCloud{deliveryOK: true},
+		WarmupRepo:       knownLeak(),
 		Publisher:        pub,
 		EmailRepository: backfillEmailRepo{account: &models.Email{
 			ID: e.Message.EmailID, WorkerID: &worker, WarmupPlacement: models.WarmupPlacementFolder,
@@ -171,7 +176,7 @@ func TestCleanupDistinguishesAMissingMailboxFromAFailedLookup(t *testing.T) {
 	_, inbox := leakedWarmup()
 	s := &JobsService{
 		UniboxRepository: inbox,
-		CloudLink:        &warmupInboxCloud{deliveryOK: true},
+		WarmupRepo:       knownLeak(),
 		Publisher:        &backfillPublisher{},
 		EmailRepository:  backfillEmailRepo{err: errx.InternalError()},
 	}
