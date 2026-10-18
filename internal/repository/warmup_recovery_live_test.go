@@ -222,3 +222,64 @@ func TestLiveWarmupFilingRequiresAcknowledgement(t *testing.T) {
 		t.Fatalf("acknowledged filing retained: count=%d err=%v", count, err)
 	}
 }
+
+func TestLiveCloudWarmedFilingsAreNeitherClaimedNorKept(t *testing.T) {
+	_, pool := liveContactDB(t)
+	requireSchemaVersion(t, pool, 270)
+	ctx := context.Background()
+	f := newSharedOrgFixture(t, pool)
+	local, cloud, worker, instance := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	if _, err := pool.Exec(ctx, `INSERT INTO fleet_nodes (id, role, name) VALUES ($1, 'worker', 'cloud-filing-test')`, worker); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO workers (id) VALUES ($1)`, worker); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO cloud_link (cloud_url, instance_id, token) VALUES ('https://cloud.example.invalid', $1, 'fixture')`, instance); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		for _, q := range []string{
+			`DELETE FROM email_accounts WHERE id = ANY($1)`,
+			`DELETE FROM cloud_link WHERE instance_id = ANY($1)`,
+			`DELETE FROM fleet_nodes WHERE id = ANY($1)`,
+		} {
+			if _, err := pool.Exec(ctx, q, []uuid.UUID{local, cloud, worker, instance}); err != nil {
+				t.Error(err)
+			}
+		}
+	})
+	for _, id := range []uuid.UUID{local, cloud} {
+		if _, err := pool.Exec(ctx, `INSERT INTO email_accounts (id, user_id, organization_id, email, name, signature_plain, signature_html, provider, status, worker_id)
+			VALUES ($1, $2, $3, $4, 'Filing', '', '', 'smtp_imap', 'active', $5)`, id, f.owner, f.org, uuid.NewString()+"@example.test", worker); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := NewCloudLinkRepository(pool, nil).Enroll(ctx, cloud, cloud, instance, false); err != nil {
+		t.Fatal(err)
+	}
+	repo := NewWarmupRecoveryRepository(pool)
+	ids := map[uuid.UUID]uuid.UUID{}
+	for _, account := range []uuid.UUID{local, cloud} {
+		id, err := repo.EnqueueFiling(ctx, models.WarmupEmailAction{EmailID: account, UserID: f.owner, RFCMessageID: "<" + account.String() + "@example.test>", Actions: []string{models.WarmupActionFile}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids[account] = id
+	}
+
+	claimed, err := repo.ClaimFilings(ctx, 100)
+	if err != nil || len(claimed) != 1 || claimed[0].FilingID != ids[local].String() {
+		t.Fatalf("claim = %+v %v, want only the local mailbox's filing", claimed, err)
+	}
+	dropped, err := repo.DropCloudFilings(ctx)
+	if err != nil || dropped != 1 {
+		t.Fatalf("dropped %d, err %v, want the Cloud mailbox's one filing", dropped, err)
+	}
+	for account, want := range map[uuid.UUID]int{local: 1, cloud: 0} {
+		var n int
+		if err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM warmup_pending_filings WHERE email_account_id = $1`, account).Scan(&n); err != nil || n != want {
+			t.Fatalf("filings for %v = %d (%v), want %d", account, n, err, want)
+		}
+	}
+}
