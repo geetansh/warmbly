@@ -48,9 +48,11 @@ type RiskCandidate struct {
 	UserID         uuid.UUID
 	OrgID          *uuid.UUID
 	CurrentBand    models.EmailRiskBand
-	HealthState    models.WarmupHealthState // may be empty if no health row
-	WorkerID       *uuid.UUID
-	LastEvaluated  *time.Time
+	HealthState    models.WarmupHealthState // may be empty if no health row; real evidence only
+	// CloudEvidenceUnknown is set while Warmbly Cloud has no current report for the mailbox.
+	CloudEvidenceUnknown bool
+	WorkerID             *uuid.UUID
+	LastEvaluated        *time.Time
 }
 
 // ListRiskCandidates joins email_accounts with warmup health so the risk sweep
@@ -71,10 +73,11 @@ func (r *workerRepository) ListRiskCandidates(ctx context.Context, limit int) ([
 			ea.organization_id,
 			ea.risk_band,
 			COALESCE(wh.health_state, '')::text,
+			`+cloudStandingUnknownSQL("ea.id")+`,
 			ea.worker_id,
 			ea.risk_evaluated_at
 		FROM email_accounts ea
-		LEFT JOIN LATERAL (`+warmupStandingSQL("ea.id")+`
+		LEFT JOIN LATERAL (`+warmupKnownStandingSQL("ea.id")+`
 		) wh ON true
 		WHERE ea.status = 'active'
 		LIMIT $1
@@ -94,6 +97,7 @@ func (r *workerRepository) ListRiskCandidates(ctx context.Context, limit int) ([
 			&c.OrgID,
 			&c.CurrentBand,
 			&hs,
+			&c.CloudEvidenceUnknown,
 			&c.WorkerID,
 			&c.LastEvaluated,
 		); err != nil {

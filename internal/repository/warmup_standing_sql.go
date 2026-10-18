@@ -1,5 +1,7 @@
 package repository
 
+import "github.com/warmbly/warmbly/internal/models"
+
 // warmupStandingRankSQL orders health states worst first when sorted DESC.
 func warmupStandingRankSQL(col string) string {
 	return `CASE ` + col + `
@@ -12,19 +14,42 @@ func warmupStandingRankSQL(col string) string {
 		END`
 }
 
-// warmupStandingSQL is a mailbox's worst warmup standing, at most one row:
-// its local pool row, or the standing Warmbly Cloud last reported for a
-// mailbox it warms (which has no local pool row). A standing past its term
-// ranks below any live one, so it cannot mask one. Every read that gates or
-// shows warmup health goes through it, so a cloud verdict holds here too.
-// Columns: health_state, blocked_until, last_health_score,
-// last_health_reason, last_health_evaluated_at.
-func warmupStandingSQL(accountExpr string) string {
-	unknown := `(clm.enrollment_state <> 'active' OR EXISTS (SELECT 1 FROM cloud_link WHERE instance_id = clm.instance_id AND disconnect_pending)
+// cloudStandingUnknownPredicate is true when the cloud_link_mailboxes row
+// aliased clm has no current, recognized standing and no live hold of its own.
+const cloudStandingUnknownPredicate = `((clm.enrollment_state <> 'active' OR EXISTS (SELECT 1 FROM cloud_link WHERE instance_id = clm.instance_id AND disconnect_pending)
 	 OR clm.health_state IS NULL OR clm.health_state NOT IN ('healthy', 'watch', 'throttled', 'quarantined', 'blocked') OR clm.standing_observed_at IS NULL
 	 OR clm.standing_observed_at <= NOW() - INTERVAL '15 minutes' OR clm.standing_observed_at > NOW())
 	 AND NOT (COALESCE(clm.health_state IN ('quarantined', 'blocked'), false)
-	 AND (clm.blocked_until IS NULL OR clm.blocked_until > NOW()))`
+	 AND (clm.blocked_until IS NULL OR clm.blocked_until > NOW())))`
+
+// warmupStandingSQL is a mailbox's worst warmup standing, at most one row:
+// its local pool row, or the standing Warmbly Cloud last reported for a
+// mailbox it warms (which has no local pool row). A standing past its term
+// ranks below any live one, so it cannot mask one. Unknown cloud evidence
+// reads as blocked, so the gates that use this fail closed.
+// Columns: health_state, blocked_until, last_health_score,
+// last_health_reason, last_health_evaluated_at.
+func warmupStandingSQL(accountExpr string) string {
+	return warmupStandingUnionSQL(accountExpr, false)
+}
+
+// warmupKnownStandingSQL is warmupStandingSQL over real evidence only: unknown
+// cloud evidence contributes no row, so it cannot rest a mailbox or hide a real hold.
+func warmupKnownStandingSQL(accountExpr string) string {
+	return warmupStandingUnionSQL(accountExpr, true)
+}
+
+// cloudStandingUnknownSQL is a boolean: the mailbox's Warmbly Cloud evidence is unknown.
+func cloudStandingUnknownSQL(accountExpr string) string {
+	return `EXISTS (SELECT 1 FROM cloud_link_mailboxes clm WHERE clm.email_account_id = ` + accountExpr + ` AND ` + cloudStandingUnknownPredicate + `)`
+}
+
+func warmupStandingUnionSQL(accountExpr string, knownOnly bool) string {
+	unknown := cloudStandingUnknownPredicate
+	cloudFilter := ""
+	if knownOnly {
+		cloudFilter = ` AND NOT COALESCE(` + unknown + `, false)`
+	}
 	return `
 		SELECT st.health_state, st.blocked_until, st.last_health_score,
 		       st.last_health_reason, st.last_health_evaluated_at
@@ -36,10 +61,10 @@ func warmupStandingSQL(accountExpr string) string {
 		        UNION ALL
 		        SELECT CASE WHEN ` + unknown + ` THEN 'blocked' ELSE clm.health_state END,
 		               CASE WHEN ` + unknown + ` THEN NULL ELSE clm.blocked_until END,
-		               clm.health_score, CASE WHEN ` + unknown + ` THEN 'cloud_evidence_unavailable' ELSE clm.health_reason END,
+		               clm.health_score, CASE WHEN ` + unknown + ` THEN '` + models.WarmupReasonCloudEvidenceUnavailable + `' ELSE clm.health_reason END,
 		               clm.health_evaluated_at
 		          FROM cloud_link_mailboxes clm
-		         WHERE clm.email_account_id = ` + accountExpr + `
+		         WHERE clm.email_account_id = ` + accountExpr + cloudFilter + `
 		        UNION ALL
 		        SELECT l.cloud_health_state, l.cloud_blocked_until,
 		               l.cloud_health_score, l.cloud_health_reason, NULL::timestamptz

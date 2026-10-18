@@ -562,11 +562,13 @@ The row shows **Resting** or **Reserve** even when no campaign is active on that
 
 A mailbox rests when it is quarantined or blocked from warmup, and returns on its own three days after that lifts. One good hour does not put it back in rotation. Spam placement never rests a mailbox: a `watch` or `throttled` mailbox stays in rotation with its daily cold volume dampened (to 70% and 50%) until placement recovers.
 
+A missing or stale [Warmbly Cloud](/guides/warmbly-cloud/#safety-and-enforcement) status is not a health signal either way. It never rests a mailbox, and it neither restarts nor ends a rest already running; campaign sends from the mailbox wait until a current status arrives.
+
 Resting only makes sense while the mailbox is in a warmup pool, because pool health is the signal it recovers on. If a resting mailbox leaves its pool (the workspace loses warmup when a trial ends or a plan changes), there is no health signal to wait for, so the mailbox returns on its own three days after its last rest stamp rather than staying out indefinitely. Pausing warmup on the mailbox does not remove it from the pool, so its health keeps being tracked and the normal three days after it lifts still apply.
 
 ### Putting a resting mailbox back yourself
 
-You do not have to wait. A resting mailbox's notice in the drawer has a **Put back into campaigns** button. It lands in `active` unless it is still quarantined or blocked from warmup, in which case it stays resting and the drawer says so: a mailbox the pool has taken out should not send cold mail, and there is no override for that short of the standing lifting.
+You do not have to wait. A resting mailbox's notice in the drawer has a **Put back into campaigns** button. It lands in `active` unless it is still quarantined or blocked from warmup, in which case it stays resting and the drawer says so: a mailbox the pool has taken out should not send cold mail, and there is no override for that short of the standing lifting. A Warmbly Cloud mailbox whose status is unavailable lands in `active` too; its campaign sends wait for a fresh status instead of keeping it resting.
 
 API keys get the same exit through `POST /emails/:id/release`, which works on a resting mailbox as well as a held one.
 
@@ -588,7 +590,7 @@ This is not the same as the risk band that decides which sending worker and IP h
 
 ## Health
 
-The Accounts list groups mailboxes as **Healthy** (sending normally), **Warming** (ramping through warmup), or **Needs attention** (paused, failing, or not sending). Each row shows the mailbox with how it connects and its tags, a **Status** that says what it is doing (**Sending**, **Warming**, **Active** when it does both, **Resting**, or **Idle**, and **Error**, **Off** or **Reconnect** when something stops it), campaign emails sent today against its cap, warmup sent today against the ramp target, the inbox rate, and the health score. Hover a status for the reason, and click any column header to sort. A drop in health between refreshes notifies you rather than waiting to be noticed.
+The Accounts list groups mailboxes as **Healthy** (sending normally), **Warming** (ramping through warmup), or **Needs attention** (paused, failing, or not sending). Each row shows the mailbox with how it connects and its tags, a **Status** that says what it is doing, campaign emails sent today against its cap, warmup sent today against the ramp target, the inbox rate, and the health score. The status is one word, and the first match wins: **Active** when it sends campaigns and warms, **Sending**, **Reserve** while you hold it, **Warming**, **Resting**, then **Idle**. A resting mailbox that still warms therefore reads **Warming**, and the icons beside the word show every activity that is on. **Error**, **Off** or **Reconnect** replace it when something stops the mailbox. Hover a status for the reason, and click any column header to sort. A drop in health between refreshes notifies you rather than waiting to be noticed.
 
 Repeated reports of the same error code count once toward the health score, at their highest unresolved severity, rather than making one problem look like several. The drawer groups identical reports while keeping different error details and sending versus sync failures separate. Connection titles name Gmail, Microsoft Outlook or the mail server. **Reported** shows the stored report time: connection and temporary provider-limit observations refresh it, while other error categories may retain their original report time. It is not proof of an ongoing outage.
 

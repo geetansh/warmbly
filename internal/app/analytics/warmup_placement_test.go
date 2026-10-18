@@ -95,3 +95,25 @@ func TestWarmupHealthKeepsReducedVolumeAsWarningWithoutDoublePenalty(t *testing.
 		})
 	}
 }
+
+// A missing Warmbly Cloud report holds sends but is no verdict on reputation:
+// a warning with the reason, never an error or a lower score.
+func TestWarmupHealthTreatsUnknownCloudEvidenceAsAWarning(t *testing.T) {
+	for _, tc := range []struct {
+		name, initialStatus, wantStatus string
+	}{
+		{"healthy", "healthy", "warning"},
+		{"existing error", "error", "error"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := models.AccountHealth{Status: tc.initialStatus, Score: 90}
+			applyWarmupHealth(&h, models.CloudStandingUnavailable())
+			if h.Score != 90 || h.Status != tc.wantStatus || len(h.Issues) != 1 || h.Issues[0] != "Warmbly Cloud status unavailable" {
+				t.Fatalf("health = %+v, want %s at 90 with the unavailable reason", h, tc.wantStatus)
+			}
+		})
+	}
+	if got := warmupHealthState(models.CloudStandingUnavailable()); got != "" {
+		t.Fatalf("ramp band = %q, want none", got)
+	}
+}

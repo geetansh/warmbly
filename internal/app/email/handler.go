@@ -151,7 +151,7 @@ func (s *emailService) SetSendHold(ctx context.Context, orgID, emailAccountID st
 			log.Error().Err(err).Str("email_account_id", account.ID.String()).Msg("could not read send lifecycle")
 			return nil, errx.InternalError()
 		}
-		d := lifecycle.Decide(models.SendLifecycleActive, nil, candidate.HealthState, time.Now())
+		d := lifecycle.Decide(models.SendLifecycleActive, nil, candidate.HealthState, candidate.CloudEvidenceUnknown, time.Now())
 		next, reason = d.Next, "released by its owner"
 		if candidate.Current == models.SendLifecycleResting {
 			reason = "put back by its owner"
