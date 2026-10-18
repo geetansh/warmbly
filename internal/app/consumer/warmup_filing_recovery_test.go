@@ -87,7 +87,7 @@ func TestWarmupFilingSurvivesUnassignedMailboxAndFailedPublish(t *testing.T) {
 			pub := &backfillPublisher{err: errors.New("bus unavailable")}
 			s := &JobsService{WarmupRecoveryRepo: recovery, UniboxRepository: inbox, Publisher: pub,
 				EmailRepository: backfillEmailRepo{account: account}}
-			if _, _, err := s.cleanWarmupInboxBatch(context.Background(), uuid.Nil); err != nil {
+			if _, err := s.cleanWarmupInboxBatch(context.Background(), &warmupInboxSweep{}); err != nil {
 				t.Fatal(err)
 			}
 			if len(recovery.queued) != 1 || len(inbox.deleted) != 1 || len(recovery.completed) != 0 {
@@ -120,7 +120,7 @@ func TestWarmupFilingPersistenceFailurePreservesCleanupCandidate(t *testing.T) {
 	s := &JobsService{WarmupRecoveryRepo: &recoveryStub{known: true, err: errors.New("database unavailable")},
 		UniboxRepository: inbox, Publisher: pub,
 		EmailRepository: backfillEmailRepo{account: &models.Email{ID: e.Message.EmailID, WorkerID: &worker}}}
-	if _, _, err := s.cleanWarmupInboxBatch(context.Background(), uuid.Nil); err == nil {
+	if _, err := s.cleanWarmupInboxBatch(context.Background(), &warmupInboxSweep{}); err == nil {
 		t.Fatal("persistence failure was reported as success")
 	}
 	if len(inbox.deleted) != 0 || len(pub.actions) != 0 {

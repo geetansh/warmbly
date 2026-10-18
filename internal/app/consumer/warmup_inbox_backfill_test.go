@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/warmbly/warmbly/internal/errx"
@@ -68,7 +69,7 @@ func TestCleanupFilesTheLeakOutOfTheCustomersOwnMailbox(t *testing.T) {
 		}},
 	}
 
-	if _, _, err := s.cleanWarmupInboxBatch(context.Background(), uuid.Nil); err != nil {
+	if _, err := s.cleanWarmupInboxBatch(context.Background(), &warmupInboxSweep{}); err != nil {
 		t.Fatalf("cleanup: %v", err)
 	}
 	if len(inbox.deleted) != 1 {
@@ -112,7 +113,7 @@ func TestCleanupLeavesWarmupAloneWhenTheOwnerAskedForInbox(t *testing.T) {
 		}},
 	}
 
-	if _, _, err := s.cleanWarmupInboxBatch(context.Background(), uuid.Nil); err != nil {
+	if _, err := s.cleanWarmupInboxBatch(context.Background(), &warmupInboxSweep{}); err != nil {
 		t.Fatalf("cleanup: %v", err)
 	}
 	if len(pub.actions) != 0 {
@@ -140,20 +141,22 @@ func TestCleanupKeepsTheRowWhenPublishingFails(t *testing.T) {
 		}},
 	}
 
-	next, done, err := s.cleanWarmupInboxBatch(context.Background(), uuid.Nil)
+	sweep := &warmupInboxSweep{}
+	_, err := s.cleanWarmupInboxBatch(context.Background(), sweep)
 	if err == nil {
 		t.Fatal("a failed publish was reported as success")
 	}
-	if done || next != uuid.Nil {
-		t.Fatalf("the sweep advanced past a leak it did not file: next=%v done=%v", next, done)
+	if resume, held := sweep.held[e.Message.EmailID]; !held || resume != uuid.Nil {
+		t.Fatalf("the mailbox was not held for a retry of the leak it did not file: %v", sweep.held)
 	}
 	if len(inbox.deleted) != 0 {
 		t.Fatal("the unibox row was deleted although the customer's copy was never filed")
 	}
 
-	// Once the bus is back the same pass files and deletes.
+	// Once the bus is back the retry files and deletes.
 	pub.err = nil
-	if _, done, err = s.cleanWarmupInboxBatch(context.Background(), uuid.Nil); err != nil || !done {
+	sweep.finish(time.Now())
+	if done, err := s.cleanWarmupInboxBatch(context.Background(), sweep); err != nil || !done {
 		t.Fatalf("retry after the bus recovered: done=%v err=%v", done, err)
 	}
 	if len(pub.actions) != 1 || len(inbox.deleted) != 1 {
@@ -172,7 +175,7 @@ func TestCleanupDistinguishesAMissingMailboxFromAFailedLookup(t *testing.T) {
 		Publisher:        &backfillPublisher{},
 		EmailRepository:  backfillEmailRepo{err: errx.InternalError()},
 	}
-	if _, _, err := s.cleanWarmupInboxBatch(context.Background(), uuid.Nil); err == nil {
+	if _, err := s.cleanWarmupInboxBatch(context.Background(), &warmupInboxSweep{}); err == nil {
 		t.Fatal("a failed mailbox lookup was reported as success")
 	}
 	if len(inbox.deleted) != 0 {
@@ -182,7 +185,7 @@ func TestCleanupDistinguishesAMissingMailboxFromAFailedLookup(t *testing.T) {
 	_, inbox = leakedWarmup()
 	s.UniboxRepository = inbox
 	s.EmailRepository = backfillEmailRepo{err: errx.ErrNotFound}
-	if _, done, err := s.cleanWarmupInboxBatch(context.Background(), uuid.Nil); err != nil || !done {
+	if done, err := s.cleanWarmupInboxBatch(context.Background(), &warmupInboxSweep{}); err != nil || !done {
 		t.Fatalf("a missing mailbox should be skipped, not retried: done=%v err=%v", done, err)
 	}
 	if len(inbox.deleted) != 1 {

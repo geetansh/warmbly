@@ -192,9 +192,10 @@ func TestCleanupRepairsALeakedThreadReply(t *testing.T) {
 	pub := &backfillPublisher{}
 	s := &JobsService{UniboxRepository: inbox, WarmupRepo: repo, Publisher: pub,
 		EmailRepository: backfillEmailRepo{account: &models.Email{WorkerID: &worker}}}
-	next, done, err := s.cleanWarmupInboxBatch(context.Background(), uuid.Nil)
-	if err != nil || !done || next != e.Message.ID {
-		t.Fatalf("sweep: %v %v %v", next, done, err)
+	sweep := &warmupInboxSweep{}
+	done, err := s.cleanWarmupInboxBatch(context.Background(), sweep)
+	if err != nil || !done || sweep.afterID != e.Message.ID {
+		t.Fatalf("sweep: %v %v %v", sweep.afterID, done, err)
 	}
 	if len(inbox.deleted) != 1 || inbox.deleted[0] != e.Message.ID {
 		t.Fatalf("deleted %v, want the leaked reply's unibox row", inbox.deleted)
