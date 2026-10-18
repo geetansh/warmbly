@@ -532,6 +532,21 @@ func (p *StreamingPublisher) PublishAccountHealth(ctx context.Context, orgID, us
 	})
 }
 
+// PublishAccountSynced tells the mailbox's organization its settings changed outside a request, so open views refetch.
+func (p *StreamingPublisher) PublishAccountSynced(ctx context.Context, orgID, userID, accountID, email, provider, status string) {
+	if p == nil || p.client == nil {
+		return
+	}
+	p.PublishAccountEvent(ctx, &AccountEvent{
+		BaseEvent:      BaseEvent{EventType: EventAccountSynced, UserID: userID},
+		OrgID:          orgID,
+		EmailAccountID: accountID,
+		Email:          email,
+		Provider:       provider,
+		Status:         status,
+	})
+}
+
 // PublishWarmupPlacement tells the sending mailbox's organization that one of
 // its warmup emails was seen landing, so placement views refresh live.
 func (p *StreamingPublisher) PublishWarmupPlacement(ctx context.Context, orgID, userID, accountID, email, landed string) {

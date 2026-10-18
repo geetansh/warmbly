@@ -120,8 +120,8 @@ func (r *warmupRepository) GetCloudStandings(ctx context.Context, accountIDs []u
 		if err := rows.Scan(&id, &state, &until, &reason); err != nil {
 			return nil, err
 		}
-		if state == string(models.WarmupHealthBlocked) && reason == "cloud_evidence_unavailable" {
-			out[id] = &models.WarmupHealthInfo{State: state, Reason: reason, BlockedUntil: until}
+		if state == string(models.WarmupHealthBlocked) && reason == models.WarmupReasonCloudEvidenceUnavailable {
+			out[id] = models.CloudStandingUnavailable()
 		} else if standing := linked[id].Standing; standing != nil {
 			out[id] = standing
 		}

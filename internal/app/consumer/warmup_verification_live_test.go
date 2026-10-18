@@ -597,7 +597,7 @@ func TestLiveWarmupInboxCleanupRemovesVerifiedCopiesAndPreservesRealMail(t *test
 			t.Fatal(err)
 		}
 	}
-	_, done, err := s.cleanWarmupInboxBatch(ctx, uuid.Nil)
+	done, err := s.cleanWarmupInboxBatch(ctx, &warmupInboxSweep{})
 	if err != nil || !done {
 		t.Fatalf("cleanup done=%v err=%v", done, err)
 	}
@@ -619,7 +619,7 @@ func TestLiveWarmupInboxCleanupRemovesVerifiedCopiesAndPreservesRealMail(t *test
 	if err != nil || stored == nil || stored.ConsumedAt == nil {
 		t.Fatalf("token after cleanup: %v %v", stored, err)
 	}
-	if _, _, err := s.cleanWarmupInboxBatch(ctx, uuid.Nil); err != nil {
+	if _, err := s.cleanWarmupInboxBatch(ctx, &warmupInboxSweep{}); err != nil {
 		t.Fatalf("repeat cleanup: %v", err)
 	}
 }

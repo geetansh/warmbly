@@ -206,6 +206,17 @@ export interface CloudLinkMailboxRow {
     enrolled_at?: Date | null;
     managed: boolean;
     cloud?: PoolLinkMailboxState | null;
+    enrollment_state?: "active" | "pending_enroll" | "pending_remove";
+    standing_observed_at?: Date | null;
+    /** When this instance last copied Warmbly Cloud's warmup settings onto the mailbox. */
+    settings_observed_at?: Date | null;
+    /** Why Warmbly Cloud last refused the enrollment; only while it is pending_enroll. */
+    enrollment_error?: CloudLinkEnrollmentError | null;
+}
+
+export interface CloudLinkEnrollmentError {
+    code: string;
+    message: string;
 }
 
 /** A Google or Microsoft consent started through Warmbly Cloud. */

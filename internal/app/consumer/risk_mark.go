@@ -18,6 +18,9 @@ func (s *JobsService) markRiskBandFromWarmupHealth(ctx context.Context, accountI
 		state = health.HealthState
 	} else if resolved, ok := s.resolveWarmupHealthState(ctx, accountID); ok {
 		state = resolved
+	} else {
+		// No reading is no verdict: an error or a missing Cloud report keeps the band.
+		return
 	}
 
 	band := models.RiskBandFromHealth(state)
@@ -37,8 +40,8 @@ func (s *JobsService) resolveWarmupHealthState(ctx context.Context, accountID uu
 
 	// The mailbox's standing, including one Warmbly Cloud reported for a
 	// mailbox it warms, so a local event cannot reset a cloud hold's band.
-	state, _, err := s.WarmupRepo.GetHealthState(ctx, accountID)
-	if err != nil {
+	state, cloudUnknown, err := s.WarmupRepo.GetKnownHealthState(ctx, accountID)
+	if err != nil || (cloudUnknown && !state.Holds()) {
 		return "", false
 	}
 	return state, true

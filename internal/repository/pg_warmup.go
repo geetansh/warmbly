@@ -156,6 +156,9 @@ type WarmupRepository interface {
 	// GetParticipantHealthForAccounts is the batched form: one pool row per
 	// mailbox in the set, keyed by account id.
 	GetParticipantHealthForAccounts(ctx context.Context, accountIDs []uuid.UUID) (map[uuid.UUID]*models.WarmupParticipantHealth, error)
+	// GetKnownHealthState is GetHealthState over real evidence only, plus
+	// whether Warmbly Cloud's evidence for the mailbox is unknown.
+	GetKnownHealthState(ctx context.Context, accountID uuid.UUID) (models.WarmupHealthState, bool, error)
 	// GetCloudStanding is the standing Warmbly Cloud last reported for a
 	// mailbox it warms; nil for any other mailbox.
 	GetCloudStanding(ctx context.Context, accountID uuid.UUID) (*models.WarmupHealthInfo, error)
@@ -590,6 +593,19 @@ func (r *warmupRepository) GetHealthState(ctx context.Context, accountID uuid.UU
 	return models.WarmupHealthState(state), blockedUntil, nil
 }
 
+func (r *warmupRepository) GetKnownHealthState(ctx context.Context, accountID uuid.UUID) (models.WarmupHealthState, bool, error) {
+	var state *string
+	var unknown bool
+	err := resultDB(ctx, r.db).QueryRow(ctx, `SELECT (SELECT k.health_state FROM (`+warmupKnownStandingSQL("$1::uuid")+`) k), `+cloudStandingUnknownSQL("$1::uuid"), accountID).Scan(&state, &unknown)
+	if err != nil {
+		return models.WarmupHealthHealthy, false, err
+	}
+	if state == nil {
+		return models.WarmupHealthHealthy, unknown, nil
+	}
+	return models.WarmupHealthState(*state), unknown, nil
+}
+
 // UnblockFromPool unblocks an account from all warmup pools
 func (r *warmupRepository) UnblockFromPool(ctx context.Context, accountID uuid.UUID) error {
 	query := `
@@ -699,8 +715,8 @@ func (r *warmupRepository) GetCloudStanding(ctx context.Context, accountID uuid.
 	if err := resultDB(ctx, r.db).QueryRow(ctx, `SELECT health_state, blocked_until, COALESCE(last_health_reason, '') FROM (`+warmupStandingSQL("$1")+`) standing`, accountID).Scan(&state, &until, &reason); err != nil {
 		return nil, err
 	}
-	if state == string(models.WarmupHealthBlocked) && reason == "cloud_evidence_unavailable" {
-		return &models.WarmupHealthInfo{State: state, Reason: reason, BlockedUntil: until}, nil
+	if state == string(models.WarmupHealthBlocked) && reason == models.WarmupReasonCloudEvidenceUnavailable {
+		return models.CloudStandingUnavailable(), nil
 	}
 	return m.Standing, nil
 }

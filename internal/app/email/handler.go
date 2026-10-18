@@ -61,7 +61,15 @@ func (s *emailService) Update(ctx context.Context, orgID, userID, emailAccountID
 		}
 	}
 
+	relayed, xerr := s.relayCloudWarmup(ctx, orgID, emailAccountID, udata)
+	if xerr != nil {
+		return nil, xerr
+	}
 	account, err := s.emailRepository.Update(ctx, orgID, emailAccountID, udata)
+	if relayed && err == errx.ErrNotEnough {
+		// Everything in the patch was the cloud's; nothing is left to write here.
+		account, err = s.emailRepository.Get(ctx, orgID, emailAccountID)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -123,6 +131,13 @@ func (s *emailService) SetWarmupLifecycle(ctx context.Context, orgID, emailAccou
 			}
 		}
 	}
+	if account, handled, xerr := s.cloudLifecycle(ctx, orgID, emailAccountID, action); handled || xerr != nil {
+		if xerr != nil {
+			return nil, xerr
+		}
+		s.publishAccountEvent(ctx, pubsub.EventAccountSynced, account)
+		return account, nil
+	}
 	account, err := s.emailRepository.SetWarmupLifecycle(ctx, orgID, emailAccountID, action)
 	if err != nil {
 		return nil, err
@@ -151,7 +166,7 @@ func (s *emailService) SetSendHold(ctx context.Context, orgID, emailAccountID st
 			log.Error().Err(err).Str("email_account_id", account.ID.String()).Msg("could not read send lifecycle")
 			return nil, errx.InternalError()
 		}
-		d := lifecycle.Decide(models.SendLifecycleActive, nil, candidate.HealthState, time.Now())
+		d := lifecycle.Decide(models.SendLifecycleActive, nil, candidate.HealthState, candidate.CloudEvidenceUnknown, time.Now())
 		next, reason = d.Next, "released by its owner"
 		if candidate.Current == models.SendLifecycleResting {
 			reason = "put back by its owner"

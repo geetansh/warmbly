@@ -429,7 +429,11 @@ func (s *analyticsService) assembleAccountStatus(ctx context.Context, email *mod
 
 // warmupHealthState reads the band off the API shape, defaulting to healthy
 // for a mailbox in no pool — the same default resolveHealthState uses.
+// Unknown cloud evidence is no band at all, so it does not dampen the ramp.
 func warmupHealthState(h *models.WarmupHealthInfo) models.WarmupHealthState {
+	if h.CloudEvidenceUnavailable() {
+		return ""
+	}
 	if h == nil || h.State == "" {
 		return models.WarmupHealthHealthy
 	}
@@ -476,6 +480,14 @@ func (s *analyticsService) warmupHealthFromParticipant(accountID uuid.UUID, part
 // applyWarmupHealth keeps reduced volume a warning and pool exclusion an error.
 func applyWarmupHealth(health *models.AccountHealth, wh *models.WarmupHealthInfo) {
 	if wh == nil {
+		return
+	}
+	// Sends wait for a fresh report, but a missing report says nothing about reputation.
+	if wh.CloudEvidenceUnavailable() {
+		if health.Status == "healthy" {
+			health.Status = "warning"
+		}
+		health.Issues = append(health.Issues, "Warmbly Cloud status unavailable")
 		return
 	}
 

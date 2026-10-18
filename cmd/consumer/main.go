@@ -517,6 +517,14 @@ func main() {
 	}
 	advancedService.WireInboxTags(inboxTagRepo)
 
+	cloudLinkService := cloudlink.NewService(repository.NewCloudLinkRepository(primaryDB.Pool, credEncrypter), emailRepo, nil)
+	// The standing sync retries pending enrollments; a refusal it records or clears reaches open dashboards.
+	cloudLinkService.OnEnrollmentRefusalChange(func(ctx context.Context, id uuid.UUID) {
+		if acc, xerr := emailRepo.GetByID(ctx, id); xerr == nil && acc != nil && acc.OrganizationID != nil {
+			streamingPublisher.PublishAccountSynced(ctx, acc.OrganizationID.String(), acc.UserID, acc.ID.String(), acc.Email, acc.Provider, acc.Status)
+		}
+	})
+
 	jobsService := &jobs.JobsService{
 		Bus:                         consumerBus,
 		Codec:                       consumerCodec,
@@ -530,7 +538,7 @@ func main() {
 		EmailAccountErrorRepository: emailAccountErrorRepo,
 		WarmupRepo:                  warmupRepo,
 		PoolLinkRepo:                repository.NewPoolLinkRepository(primaryDB.Pool),
-		CloudLink:                   cloudlink.NewService(repository.NewCloudLinkRepository(primaryDB.Pool, credEncrypter), emailRepo, nil),
+		CloudLink:                   cloudLinkService,
 		WarmupContentRepo:           repository.NewWarmupContentRepository(primaryDB.Pool),
 		WarmupEngagementRepo:        repository.NewWarmupEngagementRepository(primaryDB.Pool),
 		WarmupRecoveryRepo:          repository.NewWarmupRecoveryRepository(primaryDB.Pool),
@@ -611,6 +619,8 @@ func main() {
 	// Mirrors Warmbly Cloud's warmup verdicts onto the mailboxes it warms, so
 	// a cloud quarantine pauses their campaigns here too. No-op when unlinked.
 	go jobsService.StartCloudStandingSync(ctx, 5*time.Minute)
+	// Mirrors the warmup settings Warmbly Cloud owns, so edits made there show here.
+	go jobsService.StartCloudSettingsSync(ctx, 15*time.Minute)
 
 	// Start dead worker detection (every 5 minutes)
 	go jobsService.StartDeadWorkerDetection(ctx, 5*time.Minute)

@@ -189,13 +189,15 @@ func TestWarmupInboxCleanupRetriesCloudFailureWithoutDeletingMail(t *testing.T) 
 	inbox := &warmupCleanupInbox{events: []models.JobEventNewEmail{e}}
 	cloud := &warmupInboxCloud{deliveryErr: errors.New("unavailable")}
 	s := &JobsService{UniboxRepository: inbox, CloudLink: cloud}
-	next, done, err := s.cleanWarmupInboxBatch(context.Background(), uuid.Nil)
-	if err == nil || done || next != uuid.Nil || len(inbox.deleted) != 0 {
-		t.Fatalf("failed verification advanced cleanup or deleted mail: %v %v %v", next, done, err)
+	sweep := &warmupInboxSweep{}
+	done, err := s.cleanWarmupInboxBatch(context.Background(), sweep)
+	if resume, held := sweep.held[e.Message.EmailID]; err == nil || !done || !held || resume != uuid.Nil || len(inbox.deleted) != 0 {
+		t.Fatalf("failed verification was not held for retry or deleted mail: %v %v %v", sweep.held, done, err)
 	}
 	cloud.deliveryErr, cloud.deliveryOK = nil, true
-	next, done, err = s.cleanWarmupInboxBatch(context.Background(), next)
-	if err != nil || !done || next != e.Message.ID || len(inbox.deleted) != 1 || inbox.deleted[0] != e.Message.ID {
-		t.Fatalf("cleanup retry failed: %v %v %v", next, done, err)
+	sweep.finish(time.Now())
+	done, err = s.cleanWarmupInboxBatch(context.Background(), sweep)
+	if err != nil || !done || sweep.afterID != e.Message.ID || len(inbox.deleted) != 1 || inbox.deleted[0] != e.Message.ID {
+		t.Fatalf("cleanup retry failed: %v %v %v", sweep.afterID, done, err)
 	}
 }

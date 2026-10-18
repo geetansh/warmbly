@@ -1316,8 +1316,9 @@ func main() {
 		emailService.WireCloudLink(cloudLinkRepository)
 		cloudLinkService = cloudlink.NewService(cloudLinkRepository, emailRepostory, emailService)
 		cloudLinkService.OnStandingChange(func(ctx context.Context, change models.CloudLinkStandingChange) {
-			state, _, err := warmupRepository.GetHealthState(ctx, change.EmailAccountID)
-			if err == nil {
+			state, cloudUnknown, err := warmupRepository.GetKnownHealthState(ctx, change.EmailAccountID)
+			// A missing Cloud report is no verdict; only a real hold beside it moves the band.
+			if err == nil && (!cloudUnknown || state.Holds()) {
 				err = workerRepository.SetEmailAccountRiskBand(ctx, change.EmailAccountID, models.RiskBandFromHealth(state))
 			}
 			if err != nil {
@@ -1331,6 +1332,27 @@ func main() {
 		// Deleting a mailbox must also revoke its cloud-held credential.
 		emailService.WireCloudUnenroll(cloudLinkService)
 		emailService.WireCloudCredentials(cloudLinkService)
+		// Warmup edits for Cloud-warmed mailboxes go to Warmbly Cloud, which owns them.
+		emailService.WireCloudWarmup(cloudLinkService)
+		cloudLinkService.OnSettingsChange(func(ctx context.Context, ids []uuid.UUID) {
+			for _, id := range ids {
+				acc, xerr := emailRepostory.GetByID(ctx, id)
+				if xerr != nil || acc == nil {
+					continue
+				}
+				orgID := ""
+				if acc.OrganizationID != nil {
+					orgID = acc.OrganizationID.String()
+				}
+				streamingPublisher.PublishAccountSynced(ctx, orgID, acc.UserID, acc.ID.String(), acc.Email, acc.Provider, acc.Status)
+			}
+		})
+		// A refusal kept or cleared here also reaches teammates' open dashboards.
+		cloudLinkService.OnEnrollmentRefusalChange(func(ctx context.Context, id uuid.UUID) {
+			if acc, xerr := emailRepostory.GetByID(ctx, id); xerr == nil && acc != nil && acc.OrganizationID != nil {
+				streamingPublisher.PublishAccountSynced(ctx, acc.OrganizationID.String(), acc.UserID, acc.ID.String(), acc.Email, acc.Provider, acc.Status)
+			}
+		})
 
 		rateLimitRepository := repository.NewRateLimitRepository(primaryDB)
 		rateLimitService = ratelimit.NewService(cache, rateLimitRepository)

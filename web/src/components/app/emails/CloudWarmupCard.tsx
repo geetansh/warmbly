@@ -5,7 +5,7 @@
 import React from "react";
 import { Link } from "@tanstack/react-router";
 import toast from "react-hot-toast/headless";
-import { CloudIcon, Loader2Icon, PauseIcon, PlayIcon } from "lucide-react";
+import { AlertTriangleIcon, CloudIcon, Loader2Icon, PauseIcon, PlayIcon } from "lucide-react";
 import type { AppError } from "@/lib/api/client/normalizeError";
 import buildError from "@/lib/helper/buildError";
 import { useConfirm } from "@/hooks/context/confirm";
@@ -15,6 +15,7 @@ import { providerSupported } from "@/app/app/settings/warmbly-cloud/providers";
 import WarmupPartnerDiversity from "./WarmupPartnerDiversity";
 import WarmupSendFailureNote from "./WarmupSendFailureNote";
 import { cloudSendFailure, cloudWarmupPaused } from "@/lib/cloudWarmup";
+import { cloudStandingGapCopy, cloudStandingUnavailable } from "@/lib/mailboxStatus";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { setCloudLinkParticipation } from "@/lib/api/client/app/cloudlink/cloudLink";
 import type { DiagnosticParticipation } from "@/lib/api/models/app/cloudlink/CloudLink";
@@ -82,7 +83,7 @@ export default function CloudWarmupCard({ mailboxId, email, provider }: { mailbo
 
     const p = cloud?.participation;
     const paused = cloudWarmupPaused(cloud) || !!p && !p.send;
-    const health = cloud?.health?.state;
+    const health = cloudStandingUnavailable(cloud?.health) ? "status unavailable" : cloud?.health?.state;
     return (
         <div className="px-5 py-4">
             <div className="rounded-md border border-sky-200/70 bg-sky-50/50 px-3 py-3">
@@ -97,7 +98,7 @@ export default function CloudWarmupCard({ mailboxId, email, provider }: { mailbo
                         <div className="text-[11px] text-slate-500 truncate">
                             {cloud
                                 ? `${cloud.sent_today} of ${cloud.warmup?.target_volume ?? cloud.settings.base} today · ${cloud.sent_7d} in 7 days${cloud.spam_placed_7d ? ` · ${cloud.spam_placed_7d} landed in spam` : ""}${health ? ` · ${health}` : ""}`
-                                : "Waiting for the cloud to report"}
+                                : row.enrollment_state === "pending_enroll" ? "Waiting for Warmbly Cloud to accept it" : "Waiting for the cloud to report"}
                         </div>
                     </div>
                     <div className="flex items-center gap-1.5 shrink-0">
@@ -131,6 +132,12 @@ export default function CloudWarmupCard({ mailboxId, email, provider }: { mailbo
                         </button>
                     </div>
                 </div>
+                {row.enrollment_state === "pending_enroll" && row.enrollment_error && (
+                    <p className="mt-2 pl-10 flex items-start gap-1.5 text-[11.5px] text-amber-800">
+                        <AlertTriangleIcon className="w-3 h-3 mt-0.5 shrink-0" />
+                        <span>{cloudStandingGapCopy({ kind: "enrolling", error: row.enrollment_error, update: !!cloud }).title}</span>
+                    </p>
+                )}
                 {sendFailure && <WarmupSendFailureNote failure={sendFailure} provider={provider} cloud className="pl-10" />}
                 {p && <div className="mt-3 pl-10 space-y-2 text-xs">
                     <label className="flex justify-between">Allow disclosed diagnostic sending<Toggle disabled={busy} value={p.send} onChange={(send) => {

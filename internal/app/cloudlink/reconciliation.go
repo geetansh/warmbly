@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
@@ -129,4 +130,36 @@ func (s *service) reconcileEnrollment(ctx context.Context, l *models.CloudLink, 
 		return xerr
 	}
 	return nil
+}
+
+// cloudRefusal is Cloud's own verdict on the request: a 4xx in its vocabulary, not a throttle, blip or server fault.
+func cloudRefusal(xerr *errx.Error) bool {
+	return xerr != nil && strings.HasPrefix(xerr.Identifier, "pool_link_") &&
+		xerr.Code >= errx.BadRequest && xerr.Code < errx.Internal && xerr.Code != errx.TooManyRequests
+}
+
+// recordEnrollmentError keeps Cloud's refusal for the dashboard; anything else leaves the last refusal standing.
+func (s *service) recordEnrollmentError(ctx context.Context, accountID uuid.UUID, xerr *errx.Error) {
+	r, ok := s.repo.(repository.CloudEnrollmentErrorRepository)
+	if !ok || !cloudRefusal(xerr) {
+		return
+	}
+	changed, err := r.RecordEnrollmentError(ctx, accountID, xerr.Identifier, xerr.Message)
+	if err != nil {
+		log.Warn().Err(err).Str("account_id", accountID.String()).Msg("cloud link: enrollment refusal could not be recorded")
+		return
+	}
+	if changed {
+		s.announceEnrollmentRefusal(ctx, accountID)
+	}
+}
+
+func (s *service) OnEnrollmentRefusalChange(fn func(context.Context, uuid.UUID)) {
+	s.refusalChanged = fn
+}
+
+func (s *service) announceEnrollmentRefusal(ctx context.Context, accountID uuid.UUID) {
+	if s.refusalChanged != nil {
+		s.refusalChanged(ctx, accountID)
+	}
 }

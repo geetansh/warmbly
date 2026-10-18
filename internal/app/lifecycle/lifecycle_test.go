@@ -12,7 +12,7 @@ func TestDecideRestsOnRealTrouble(t *testing.T) {
 	for _, h := range []models.WarmupHealthState{
 		models.WarmupHealthQuarantined, models.WarmupHealthBlocked,
 	} {
-		d := Decide(models.SendLifecycleActive, nil, h, now)
+		d := Decide(models.SendLifecycleActive, nil, h, false, now)
 		if d.Next != models.SendLifecycleResting {
 			t.Errorf("health %q gave %q, want resting", h, d.Next)
 		}
@@ -26,7 +26,7 @@ func TestDecideRestsOnRealTrouble(t *testing.T) {
 // cold budget is dampened, and it stays in rotation.
 func TestDecideDoesNotRestOnPlacementBands(t *testing.T) {
 	for _, h := range []models.WarmupHealthState{models.WarmupHealthWatch, models.WarmupHealthThrottled} {
-		if d := Decide(models.SendLifecycleActive, nil, h, time.Now()); d.Next != models.SendLifecycleActive {
+		if d := Decide(models.SendLifecycleActive, nil, h, false, time.Now()); d.Next != models.SendLifecycleActive {
 			t.Errorf("%s gave %q, want active", h, d.Next)
 		}
 	}
@@ -36,19 +36,19 @@ func TestDecideResumesOnlyAfterProbation(t *testing.T) {
 	now := time.Date(2026, 3, 10, 12, 0, 0, 0, time.UTC)
 
 	served := now.Add(-models.RestProbation)
-	if d := Decide(models.SendLifecycleResting, &served, models.WarmupHealthHealthy, now); d.Next != models.SendLifecycleActive {
+	if d := Decide(models.SendLifecycleResting, &served, models.WarmupHealthHealthy, false, now); d.Next != models.SendLifecycleActive {
 		t.Errorf("a recovered mailbox that served its rest gave %q, want active", d.Next)
 	}
 
 	fresh := now.Add(-time.Hour)
-	if d := Decide(models.SendLifecycleResting, &fresh, models.WarmupHealthHealthy, now); d.Next != models.SendLifecycleResting {
+	if d := Decide(models.SendLifecycleResting, &fresh, models.WarmupHealthHealthy, false, now); d.Next != models.SendLifecycleResting {
 		t.Errorf("an hour of rest gave %q, want it still resting", d.Next)
 	}
 
-	if d := Decide(models.SendLifecycleResting, &served, models.WarmupHealthQuarantined, now); d.Next != models.SendLifecycleResting {
+	if d := Decide(models.SendLifecycleResting, &served, models.WarmupHealthQuarantined, false, now); d.Next != models.SendLifecycleResting {
 		t.Errorf("a still-quarantined mailbox gave %q, want resting", d.Next)
 	}
-	if d := Decide(models.SendLifecycleResting, &served, models.WarmupHealthThrottled, now); d.Next != models.SendLifecycleActive {
+	if d := Decide(models.SendLifecycleResting, &served, models.WarmupHealthThrottled, false, now); d.Next != models.SendLifecycleActive {
 		t.Errorf("a throttled mailbox that served its rest gave %q, want active at its dampened volume", d.Next)
 	}
 }
@@ -59,7 +59,7 @@ func TestDecideNeverTouchesReserve(t *testing.T) {
 	for _, h := range []models.WarmupHealthState{
 		models.WarmupHealthHealthy, models.WarmupHealthThrottled, models.WarmupHealthBlocked,
 	} {
-		if d := Decide(models.SendLifecycleReserve, nil, h, now); d.Next != models.SendLifecycleReserve {
+		if d := Decide(models.SendLifecycleReserve, nil, h, false, now); d.Next != models.SendLifecycleReserve {
 			t.Errorf("health %q moved a reserved mailbox to %q", h, d.Next)
 		}
 	}
@@ -68,7 +68,7 @@ func TestDecideNeverTouchesReserve(t *testing.T) {
 // A row written before the column existed reads as empty and must be treated
 // as active rather than left in limbo.
 func TestDecideTreatsAnUnsetStateAsActive(t *testing.T) {
-	if d := Decide("", nil, models.WarmupHealthHealthy, time.Now()); d.Next != models.SendLifecycleActive {
+	if d := Decide("", nil, models.WarmupHealthHealthy, false, time.Now()); d.Next != models.SendLifecycleActive {
 		t.Errorf("an unset lifecycle gave %q, want active", d.Next)
 	}
 }
@@ -80,7 +80,7 @@ func TestDecideRestartsProbationWhileStillOut(t *testing.T) {
 	now := time.Date(2026, 3, 10, 12, 0, 0, 0, time.UTC)
 	longAgo := now.Add(-10 * 24 * time.Hour)
 
-	d := Decide(models.SendLifecycleResting, &longAgo, models.WarmupHealthQuarantined, now)
+	d := Decide(models.SendLifecycleResting, &longAgo, models.WarmupHealthQuarantined, false, now)
 	if d.Next != models.SendLifecycleResting {
 		t.Errorf("next = %q, want it still resting", d.Next)
 	}
@@ -89,7 +89,7 @@ func TestDecideRestartsProbationWhileStillOut(t *testing.T) {
 	}
 
 	// Once healthy, the clock runs and is not restarted.
-	healthy := Decide(models.SendLifecycleResting, &longAgo, models.WarmupHealthHealthy, now)
+	healthy := Decide(models.SendLifecycleResting, &longAgo, models.WarmupHealthHealthy, false, now)
 	if healthy.RestartProbation {
 		t.Error("a healthy mailbox must not have its probation restarted")
 	}
@@ -104,7 +104,7 @@ func TestDecideDoesNotRestartProbationForOtherStates(t *testing.T) {
 	for _, state := range []models.SendLifecycle{
 		models.SendLifecycleActive, models.SendLifecycleReserve, "",
 	} {
-		if d := Decide(state, nil, models.WarmupHealthWatch, now); d.RestartProbation {
+		if d := Decide(state, nil, models.WarmupHealthWatch, false, now); d.RestartProbation {
 			t.Errorf("state %q asked to restart probation", state)
 		}
 	}
@@ -119,7 +119,7 @@ func TestUnknownHealthResumesOnlyAfterTheRestWindow(t *testing.T) {
 	now := time.Date(2026, 3, 10, 12, 0, 0, 0, time.UTC)
 
 	fresh := now.Add(-time.Hour)
-	d := Decide(models.SendLifecycleResting, &fresh, "", now)
+	d := Decide(models.SendLifecycleResting, &fresh, "", false, now)
 	if d.Next != models.SendLifecycleResting {
 		t.Fatalf("resting mailbox with no pool resumed after an hour: %v", d.Next)
 	}
@@ -128,7 +128,7 @@ func TestUnknownHealthResumesOnlyAfterTheRestWindow(t *testing.T) {
 	}
 
 	served := now.Add(-models.RestProbation)
-	d = Decide(models.SendLifecycleResting, &served, "", now)
+	d = Decide(models.SendLifecycleResting, &served, "", false, now)
 	if d.Next != models.SendLifecycleActive {
 		t.Fatalf("resting mailbox with no pool stayed %v after the rest window", d.Next)
 	}
@@ -136,7 +136,7 @@ func TestUnknownHealthResumesOnlyAfterTheRestWindow(t *testing.T) {
 		t.Fatal("resuming with no signal needs a reason the owner can read")
 	}
 
-	if d := Decide(models.SendLifecycleActive, &served, "", now); d.Next != models.SendLifecycleActive {
+	if d := Decide(models.SendLifecycleActive, &served, "", false, now); d.Next != models.SendLifecycleActive {
 		t.Fatalf("active mailbox with no pool moved to %v", d.Next)
 	}
 }
@@ -144,7 +144,40 @@ func TestUnknownHealthResumesOnlyAfterTheRestWindow(t *testing.T) {
 // A resting mailbox with no clock cannot serve a window, so it stays put
 // rather than resuming on a missing stamp.
 func TestUnknownHealthWithNoClockStaysResting(t *testing.T) {
-	if d := Decide(models.SendLifecycleResting, nil, "", time.Now()); d.Next != models.SendLifecycleResting {
+	if d := Decide(models.SendLifecycleResting, nil, "", false, time.Now()); d.Next != models.SendLifecycleResting {
 		t.Fatalf("resting mailbox with no since resumed: %v", d.Next)
+	}
+}
+
+// A missing Warmbly Cloud report holds sends at the gate, but it is not a
+// verdict: it must not rest a mailbox, restart its probation or resume it.
+func TestCloudUnknownNeverRestsOrRestarts(t *testing.T) {
+	now := time.Date(2026, 3, 10, 12, 0, 0, 0, time.UTC)
+	served := now.Add(-models.RestProbation)
+
+	d := Decide(models.SendLifecycleActive, &served, "", true, now)
+	if d.Next != models.SendLifecycleActive || d.RestartProbation {
+		t.Fatalf("active with unknown cloud evidence gave %+v, want it left active", d)
+	}
+
+	d = Decide(models.SendLifecycleResting, &served, "", true, now)
+	if d.Next != models.SendLifecycleResting || d.RestartProbation {
+		t.Fatalf("resting with unknown cloud evidence gave %+v, want it left resting with its clock running", d)
+	}
+	if d.Reason == "" {
+		t.Fatal("holding on unknown cloud evidence needs a reason the owner can read")
+	}
+
+	d = Decide(models.SendLifecycleActive, nil, models.WarmupHealthQuarantined, true, now)
+	if d.Next != models.SendLifecycleResting {
+		t.Fatalf("a real quarantine beside unknown cloud evidence gave %q, want resting", d.Next)
+	}
+	d = Decide(models.SendLifecycleResting, &served, models.WarmupHealthBlocked, true, now)
+	if d.Next != models.SendLifecycleResting || !d.RestartProbation {
+		t.Fatalf("a real block beside unknown cloud evidence gave %+v, want resting with probation restarted", d)
+	}
+
+	if d := Decide(models.SendLifecycleReserve, nil, "", true, now); d.Next != models.SendLifecycleReserve {
+		t.Fatalf("unknown cloud evidence moved a reserved mailbox to %q", d.Next)
 	}
 }
