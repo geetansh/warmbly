@@ -315,8 +315,16 @@ type CloudLinkMailbox struct {
 	StandingObservedAt *time.Time `json:"standing_observed_at,omitempty"`
 	// SettingsObservedAt is when the local warmup columns last mirrored the cloud's settings.
 	SettingsObservedAt *time.Time `json:"settings_observed_at,omitempty"`
+	// EnrollmentError is why Warmbly Cloud last refused a pending enrollment.
+	EnrollmentError *CloudLinkEnrollmentError `json:"enrollment_error,omitempty"`
 	// Standing is the warmup health the cloud last reported; nil until it has.
 	Standing *WarmupHealthInfo `json:"-"`
+}
+
+// CloudLinkEnrollmentError is Warmbly Cloud's answer to an enrollment it refused.
+type CloudLinkEnrollmentError struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
 }
 
 // CloudLinkStandingChange is a cloud-reported health transition the
@@ -362,6 +370,8 @@ type CloudLinkMailboxRow struct {
 	EnrollmentState    string                `json:"enrollment_state,omitempty"`
 	StandingObservedAt *time.Time            `json:"standing_observed_at,omitempty"`
 	SettingsObservedAt *time.Time            `json:"settings_observed_at,omitempty"`
+	// EnrollmentError is set only while EnrollmentState is pending_enroll.
+	EnrollmentError *CloudLinkEnrollmentError `json:"enrollment_error,omitempty"`
 }
 
 // PoolLinkOffer is the warmup plan as an upgrade prompt sees it:

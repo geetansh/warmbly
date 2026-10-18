@@ -130,3 +130,14 @@ func (s *service) reconcileEnrollment(ctx context.Context, l *models.CloudLink, 
 	}
 	return nil
 }
+
+// recordEnrollmentError keeps a Cloud or link refusal for the dashboard; a local fault says nothing actionable.
+func (s *service) recordEnrollmentError(ctx context.Context, accountID uuid.UUID, xerr *errx.Error) {
+	r, ok := s.repo.(repository.CloudEnrollmentErrorRepository)
+	if !ok || xerr == nil || xerr.Identifier == "" {
+		return
+	}
+	if err := r.RecordEnrollmentError(ctx, accountID, xerr.Identifier, xerr.Message); err != nil {
+		log.Warn().Err(err).Str("account_id", accountID.String()).Msg("cloud link: enrollment refusal could not be recorded")
+	}
+}

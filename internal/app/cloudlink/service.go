@@ -579,6 +579,9 @@ func (s *service) ListMailboxes(ctx context.Context, orgID uuid.UUID) ([]models.
 			row.EnrollmentState = e.EnrollmentState
 			row.StandingObservedAt = e.StandingObservedAt
 			row.SettingsObservedAt = e.SettingsObservedAt
+			if e.EnrollmentState == "pending_enroll" {
+				row.EnrollmentError = e.EnrollmentError
+			}
 			row.Cloud = cloudByAccount[a.ID]
 			// The recorded standing covers a mailbox the cloud holds out of its pool.
 			if row.Cloud != nil {
@@ -712,6 +715,7 @@ func (s *service) Enroll(ctx context.Context, orgID, accountID uuid.UUID) (*mode
 	}
 	s.syncLocalPool(ctx, acc.ID)
 	if xerr := s.clientFor(l).do(ctx, http.MethodPost, "/instance/mailboxes", req, &state); xerr != nil {
+		s.recordEnrollmentError(ctx, acc.ID, xerr)
 		return nil, xerr
 	}
 	if _, err := s.repo.Enroll(ctx, acc.ID, acc.ID, l.InstanceID, false); err != nil {

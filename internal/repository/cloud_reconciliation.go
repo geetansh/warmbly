@@ -55,3 +55,14 @@ func (r *cloudLinkRepository) InvalidateStanding(ctx context.Context, accountID 
 	_, err := r.db.Exec(ctx, `UPDATE cloud_link_mailboxes SET standing_observed_at = NULL WHERE email_account_id = $1`, accountID)
 	return err
 }
+
+// CloudEnrollmentErrorRepository keeps Warmbly Cloud's refusal on the pending enrollment it answered.
+type CloudEnrollmentErrorRepository interface {
+	RecordEnrollmentError(ctx context.Context, accountID uuid.UUID, code, message string) error
+}
+
+func (r *cloudLinkRepository) RecordEnrollmentError(ctx context.Context, accountID uuid.UUID, code, message string) error {
+	_, err := r.db.Exec(ctx, `UPDATE cloud_link_mailboxes SET enrollment_error_code = $2, enrollment_error = $3
+ WHERE email_account_id = $1 AND enrollment_state = 'pending_enroll'`, accountID, code, message)
+	return err
+}
