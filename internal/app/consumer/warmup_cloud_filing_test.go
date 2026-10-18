@@ -107,8 +107,7 @@ func TestWarmupFilingRecoveryDropsCloudFilingsBeforeRetrying(t *testing.T) {
 	}
 }
 
-// Only an active enrollment hands filing to the cloud: an ordinary mailbox, and one whose
-// enrollment has not settled, still get a durable filing from this instance.
+// Only an active enrollment hands filing to the cloud; any other mailbox still gets a durable filing here.
 func TestFilingIsQueuedForAMailboxTheCloudDoesNotHold(t *testing.T) {
 	for name, cloud := range map[string]*warmupInboxCloud{
 		"not enrolled":    {notEnrolled: true},

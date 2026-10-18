@@ -144,8 +144,7 @@ func (r *warmupRecoveryRepository) CompleteFiling(ctx context.Context, accountID
 	return err
 }
 
-// DropCloudFilings removes filings for mailboxes the cloud actively warms, which workers never admit.
-// A pending enrollment's filings stay parked: ClaimFilings skips them until the enrollment settles.
+// DropCloudFilings removes filings for actively Cloud-warmed mailboxes; a pending enrollment's stay parked by ClaimFilings.
 func (r *warmupRecoveryRepository) DropCloudFilings(ctx context.Context) (int64, error) {
 	tag, err := r.db.Exec(ctx, `DELETE FROM warmup_pending_filings WHERE id IN (
 		SELECT f.id FROM warmup_pending_filings f
