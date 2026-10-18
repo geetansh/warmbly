@@ -59,6 +59,7 @@ type heldMailbox struct {
 	retries int       // retry sweeps in a row that finished none of its rows
 	due     time.Time
 	err     error
+	seq     int // order of holds, so the summary names the latest one
 }
 
 // warmupInboxSweep is the cleanup's position, carried across one-minute passes.
@@ -70,11 +71,13 @@ type warmupInboxSweep struct {
 	only map[uuid.UUID]heldMailbox
 	// waiting are held mailboxes whose retry is not due yet.
 	waiting map[uuid.UUID]heldMailbox
+	// deferred are held mailboxes left for the next daily sweep, which comes before their next retry would.
+	deferred map[uuid.UUID]heldMailbox
 	// progressed marks the mailboxes with a row finished this sweep.
 	progressed    map[uuid.UUID]bool
 	interruptedAt uuid.UUID
 	interruptions int
-	lastErr       error
+	holds         int
 	fullAt        time.Time
 	now           func() time.Time
 }
@@ -101,11 +104,12 @@ func (w *warmupInboxSweep) hold(mailbox uuid.UUID, err error) {
 	if w.held == nil {
 		w.held = map[uuid.UUID]heldMailbox{}
 	}
-	h := heldMailbox{resume: w.afterID, err: err}
+	w.holds++
+	h := heldMailbox{resume: w.afterID, err: err, seq: w.holds}
 	if prev, ok := w.only[mailbox]; ok {
 		h.retries = prev.retries
 	}
-	w.held[mailbox], w.lastErr = h, err
+	w.held[mailbox] = h
 }
 
 // finished records a row that ran to completion, which counts as progress for its mailbox.
@@ -130,11 +134,14 @@ func (w *warmupInboxSweep) interrupted(id uuid.UUID) bool {
 // finish closes a sweep and returns when the next starts: a retry of the mailboxes due, else the next full sweep.
 func (w *warmupInboxSweep) finish(now time.Time) time.Time {
 	if w.only == nil {
-		// A full sweep revisits every mailbox, so nothing held before it is still waiting.
-		w.fullAt, w.waiting = now.Add(warmupCleanupInterval), nil
+		// A full sweep revisits every mailbox, so nothing held before it is still owed a check.
+		w.fullAt, w.waiting, w.deferred = now.Add(warmupCleanupInterval), nil, nil
 	}
 	if w.waiting == nil {
 		w.waiting = map[uuid.UUID]heldMailbox{}
+	}
+	if w.deferred == nil {
+		w.deferred = map[uuid.UUID]heldMailbox{}
 	}
 	for m, h := range w.held {
 		if w.progressed[m] {
@@ -146,11 +153,12 @@ func (w *warmupInboxSweep) finish(now time.Time) time.Time {
 		}
 		if h.due.Before(w.fullAt) {
 			w.waiting[m] = h
+		} else {
+			w.deferred[m] = h
 		}
 	}
 	w.afterID, w.held, w.only, w.progressed = uuid.Nil, nil, nil, nil
 	if len(w.waiting) == 0 {
-		w.lastErr = nil
 		return w.fullAt
 	}
 	next := w.fullAt
@@ -174,18 +182,22 @@ func (w *warmupInboxSweep) finish(now time.Time) time.Time {
 	return next
 }
 
-// heldError names the mailboxes still waiting on a retry, nil when there are none.
+// heldError names the mailboxes still owed a check and the latest failure among them, nil when there are none.
 func (w *warmupInboxSweep) heldError() error {
 	ids := map[uuid.UUID]bool{}
-	for _, set := range []map[uuid.UUID]heldMailbox{w.held, w.only, w.waiting} {
-		for id := range set {
+	var latest heldMailbox
+	for _, set := range []map[uuid.UUID]heldMailbox{w.held, w.only, w.waiting, w.deferred} {
+		for id, h := range set {
 			ids[id] = true
+			if h.seq > latest.seq {
+				latest = h
+			}
 		}
 	}
-	if len(ids) == 0 || w.lastErr == nil {
+	if len(ids) == 0 || latest.err == nil {
 		return nil
 	}
-	return fmt.Errorf("warmup inbox cleanup holds %d mailbox(es) for retry: %w", len(ids), w.lastErr)
+	return fmt.Errorf("warmup inbox cleanup holds %d mailbox(es) for retry: %w", len(ids), latest.err)
 }
 
 func (w *warmupInboxSweep) hasTime(ctx context.Context) bool {
@@ -289,7 +301,6 @@ func (s *JobsService) retryPendingWarmupVerification(ctx context.Context) error 
 	return errors.Join(failures...)
 }
 
-// cleanWarmupInboxBatch runs one pass and reports whether the sweep reached the end.
 // cleanWarmupInboxBatch runs one pass and reports whether the sweep reached the end.
 func (s *JobsService) cleanWarmupInboxBatch(ctx context.Context, sweep *warmupInboxSweep) (bool, error) {
 	var failures []error

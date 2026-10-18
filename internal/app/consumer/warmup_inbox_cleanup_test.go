@@ -363,7 +363,34 @@ func TestWarmupInboxSweepRetriesEachMailboxOnItsOwnClock(t *testing.T) {
 		}
 		sweep.finish(now)
 	}
-	if len(sweep.waiting) != 0 || sweep.heldError() != nil {
+	if len(sweep.waiting) != 0 {
 		t.Fatalf("waiting %v past the daily sweep", sweep.waiting)
+	}
+	// Left to the daily sweep, it is still owed a check, so the panel keeps saying so.
+	if sweep.heldError() == nil {
+		t.Fatal("a mailbox deferred to the daily sweep is reported as clear")
+	}
+	if sweep.finish(now); sweep.heldError() != nil {
+		t.Fatal("still reported after a daily sweep that checked it cleanly")
+	}
+}
+
+// The panel names a mailbox that is still held, never one that has since cleared.
+func TestWarmupInboxHeldErrorNamesAMailboxStillHeld(t *testing.T) {
+	stuck, clearing := uuid.New(), uuid.New()
+	errStuck, errClearing := errors.New("stuck"), errors.New("clearing")
+	sweep := &warmupInboxSweep{}
+	sweep.hold(stuck, errStuck)
+	sweep.hold(clearing, errClearing)
+	sweep.finished(clearing)
+	now := time.Now()
+	sweep.finish(now)
+	if !errors.Is(sweep.heldError(), errClearing) {
+		t.Fatalf("held error %v, want the latest hold", sweep.heldError())
+	}
+	// The clearing mailbox's retry finishes without failing; only the stuck one is left.
+	sweep.finish(now)
+	if err := sweep.heldError(); !errors.Is(err, errStuck) || errors.Is(err, errClearing) {
+		t.Fatalf("held error %v, want the mailbox still held", err)
 	}
 }
