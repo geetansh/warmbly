@@ -156,6 +156,8 @@ type Service interface {
 	SyncStanding(ctx context.Context) ([]models.CloudLinkStandingChange, *errx.Error)
 	// OnStandingChange registers mailbox-list transitions; SyncStanding returns its own.
 	OnStandingChange(func(context.Context, models.CloudLinkStandingChange))
+	// OnEnrollmentRefusalChange registers a mailbox whose kept Cloud refusal was set, replaced or cleared.
+	OnEnrollmentRefusalChange(func(context.Context, uuid.UUID))
 	// IsCloudWarmupThreadReply asks by ancestry: whether what a tokenless
 	// message answers is a turn of one of the cloud's warmup conversations.
 	IsCloudWarmupThreadReply(ctx context.Context, accountID uuid.UUID, messageID string, inReplyTo []string) (bool, error)
@@ -185,6 +187,7 @@ type service struct {
 	disconnected    []func(context.Context, uuid.UUID)
 	standingChanged func(context.Context, models.CloudLinkStandingChange)
 	settingsChanged func(context.Context, []uuid.UUID)
+	refusalChanged  func(context.Context, uuid.UUID)
 }
 
 func (s *service) OnStandingChange(fn func(context.Context, models.CloudLinkStandingChange)) {
@@ -753,6 +756,9 @@ func (s *service) Enroll(ctx context.Context, orgID, accountID uuid.UUID) (*mode
 	if _, err := s.repo.Enroll(ctx, acc.ID, acc.ID, l.InstanceID, false); err != nil {
 		// The durable intent remains unavailable locally until retry confirms enrollment.
 		return nil, errx.InternalError()
+	}
+	if m != nil && m.EnrollmentError != nil {
+		s.announceEnrollmentRefusal(ctx, acc.ID)
 	}
 	s.syncLocalPool(ctx, acc.ID)
 	s.recordStanding(ctx, acc.ID, state.Health, true)
