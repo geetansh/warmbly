@@ -59,11 +59,16 @@ type warmupInboxCloud struct {
 	tokenOK, deliveryOK, threadOK          bool
 	tokenErr, deliveryErr, threadErr       error
 	enrollmentErr                          error
+	notEnrolled, pendingEnroll             bool
 	tokenCalls, deliveryCalls, threadCalls int
 }
 
 func (c *warmupInboxCloud) CheckEnrollment(context.Context, uuid.UUID) (bool, error) {
-	return true, c.enrollmentErr
+	return !c.notEnrolled, c.enrollmentErr
+}
+
+func (c *warmupInboxCloud) FilesWarmupMail(context.Context, uuid.UUID) (bool, error) {
+	return !c.notEnrolled && !c.pendingEnroll, c.enrollmentErr
 }
 
 func (c *warmupInboxCloud) VerifyWarmupToken(ctx context.Context, _ uuid.UUID, _ string) (bool, error) {
