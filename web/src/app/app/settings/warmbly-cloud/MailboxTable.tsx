@@ -18,6 +18,7 @@ import { useConfirm } from "@/hooks/context/confirm";
 import { TableSurface, Toggle } from "../_components/SectionShell";
 import { providerLabel, providerSupported } from "./providers";
 import { cloudWarmupPaused } from "@/lib/cloudWarmup";
+import { cloudStandingUnavailable } from "@/lib/mailboxStatus";
 
 export default function MailboxTable() {
     const rows = useCloudLinkMailboxes();
@@ -164,6 +165,12 @@ export default function MailboxTable() {
 function HealthPill({ health, paused }: { health: PoolLinkWarmupHealth | null; paused: boolean }) {
     if (paused) return <Pill tone="muted">Paused</Pill>;
     if (!health) return <Pill tone="muted">Starting</Pill>;
+    if (cloudStandingUnavailable(health))
+        return (
+            <Pill tone="warn" title="Warmbly Cloud has not reported a current status. Campaign sends wait for one; this is not a block.">
+                Unavailable
+            </Pill>
+        );
     switch (health.state) {
         case "healthy":
             return <Pill tone="ok">Healthy</Pill>;

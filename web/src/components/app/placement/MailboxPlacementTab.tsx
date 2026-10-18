@@ -11,6 +11,7 @@ import useWarmupPlacement from "@/lib/api/hooks/app/analytics/useWarmupPlacement
 import type { WarmupHealthInfo } from "@/lib/api/models/app/analytics/AccountStatus";
 import type { PlacementGroup } from "@/lib/api/models/app/analytics/WarmupPlacement";
 import { cn } from "@/lib/utils";
+import { cloudStandingUnavailable } from "@/lib/mailboxStatus";
 import {
     BAND,
     GROUP_LABEL,
@@ -98,7 +99,11 @@ export default function MailboxPlacementTab({ mailboxId, poolHealth }: { mailbox
                 <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2 flex-wrap">
                         <BandChip band={rate.band} />
-                        {poolHealth && POOL_STATE_LABEL[poolHealth.state] && (
+                        {poolHealth && cloudStandingUnavailable(poolHealth) ? (
+                            <span className="inline-flex items-center rounded px-1.5 h-5 text-[10px] font-medium border bg-amber-50 text-amber-700 border-amber-200" title="Warmbly Cloud has not reported a current status">
+                                Pool standing: unavailable
+                            </span>
+                        ) : poolHealth && POOL_STATE_LABEL[poolHealth.state] && (
                             <span className="inline-flex items-center rounded px-1.5 h-5 text-[10px] font-medium border bg-orange-50 text-orange-700 border-orange-200" title={poolHealth.reason}>
                                 {POOL_STATE_LABEL[poolHealth.state]}
                             </span>

@@ -275,7 +275,7 @@ func detectWarmupReplyRateLow(s *repository.AdvisorSnapshot) []Finding {
 func detectCloudStandingUnavailable(s *repository.AdvisorSnapshot) []Finding {
 	out := []Finding{}
 	for _, m := range s.Mailboxes {
-		if m.PoolHealthReason == "cloud_evidence_unavailable" {
+		if m.PoolHealthReason == models.WarmupReasonCloudEvidenceUnavailable {
 			out = append(out, Finding{
 				Key: "cloud_standing_unavailable", GroupTitle: "{count} mailboxes need a fresh Cloud pool status",
 				Category: models.AdvisorCategoryWarmup, Severity: models.AdvisorHigh, Surface: models.AdvisorSurfaceMailboxes,
@@ -294,7 +294,7 @@ func detectCloudStandingUnavailable(s *repository.AdvisorSnapshot) []Finding {
 func detectWarmupPoolThrottled(s *repository.AdvisorSnapshot) []Finding {
 	out := []Finding{}
 	for _, m := range s.Mailboxes {
-		if m.PoolHealth != string(models.WarmupHealthThrottled) || m.PoolHealthReason == "cloud_evidence_unavailable" {
+		if m.PoolHealth != string(models.WarmupHealthThrottled) || m.PoolHealthReason == models.WarmupReasonCloudEvidenceUnavailable {
 			continue
 		}
 		remedy := "Keep warmup running and let Warmbly manage the reduced sending pace. Do not raise the daily cap to bypass the slowdown. Recovery follows the reason shown, without manual pool re-entry; separate ramp limits still apply."
@@ -335,7 +335,7 @@ func detectWarmupPoolThrottled(s *repository.AdvisorSnapshot) []Finding {
 func detectWarmupPoolBlocked(s *repository.AdvisorSnapshot) []Finding {
 	out := []Finding{}
 	for _, m := range s.Mailboxes {
-		if m.PoolHealthReason == "cloud_evidence_unavailable" {
+		if m.PoolHealthReason == models.WarmupReasonCloudEvidenceUnavailable {
 			continue
 		}
 		// Recoverable bands also carry blocked_until; their timer is not pool exclusion.

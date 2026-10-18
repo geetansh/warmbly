@@ -5,7 +5,7 @@ import { browseString, mailboxSort, mailboxTab, type MailboxTab } from "@/lib/br
 import { useSearchParams } from "@/hooks/useSearchParams";
 import useMailboxTagFilter from "@/hooks/useMailboxTagFilter";
 import groupMailboxes from "@/lib/groupMailboxes";
-import { mailboxColdActivity } from "@/lib/mailboxStatus";
+import { cloudStandingUnavailable as cloudHealthUnavailable, mailboxActivityLabel, mailboxColdActivity } from "@/lib/mailboxStatus";
 import { useAppStore } from "@/stores/useAppStore";
 import toast from "react-hot-toast/headless";
 import { useQueryClient } from "@tanstack/react-query";
@@ -251,7 +251,7 @@ export default function AddressesPage() {
             next.set(s.id, cur);
             const before = prev.get(s.id);
             if (before && (HEALTH_RANK[cur] ?? 0) > (HEALTH_RANK[before] ?? 0)) {
-                const reason = s.warmup_health?.reason || s.health?.issues?.[0];
+                const reason = (!cloudHealthUnavailable(s.warmup_health) && s.warmup_health?.reason) || s.health?.issues?.[0];
                 toast.error(`${s.email} health dropped to ${cur}${reason ? ` — ${reason}` : ""}`);
             }
         }
@@ -1447,7 +1447,7 @@ function MailboxStatusPill({ box, status, historicalIssue, warming, compact = fa
     if (!status) return <span className="text-[10.5px] text-slate-500">{pending ? "Checking…" : "Unavailable"}</span>;
 
     // One word; the icons beside it say which activities are on.
-    const label = sending && warming ? "Active" : sending ? "Sending" : resting ? (lifecycle?.state === "reserve" ? "Reserve" : "Resting") : warming ? "Warming" : "Idle";
+    const label = mailboxActivityLabel(status, warming);
     const title = [
         sending ? "Sending campaign emails" : resting ? `Held out of campaign sending${lifecycle?.reason ? `: ${lifecycle.reason}` : ""}` : "Not in a live campaign",
         warming
@@ -1458,7 +1458,7 @@ function MailboxStatusPill({ box, status, historicalIssue, warming, compact = fa
                 ? "warmup paused"
                 : "warmup off",
     ].join(", ");
-    const text = sending ? "text-sky-700" : resting ? "text-violet-600" : warming ? "text-orange-600" : "text-slate-400";
+    const text = sending ? "text-sky-700" : label === "Warming" ? "text-orange-600" : resting ? "text-violet-600" : "text-slate-400";
     return (
         <span className={`inline-flex items-center gap-1.5 max-w-full text-[10.5px] font-medium uppercase tracking-[0.08em] ${text}`} title={title}>
             <span className="inline-flex items-center gap-0.5 shrink-0">
