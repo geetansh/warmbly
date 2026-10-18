@@ -135,7 +135,7 @@ export default function CloudWarmupCard({ mailboxId, email, provider }: { mailbo
                 {row.enrollment_state === "pending_enroll" && row.enrollment_error && (
                     <p className="mt-2 pl-10 flex items-start gap-1.5 text-[11.5px] text-amber-800">
                         <AlertTriangleIcon className="w-3 h-3 mt-0.5 shrink-0" />
-                        <span>{cloudStandingGapCopy({ kind: "enrolling", error: row.enrollment_error }).title}</span>
+                        <span>{cloudStandingGapCopy({ kind: "enrolling", error: row.enrollment_error, update: !!cloud }).title}</span>
                     </p>
                 )}
                 {sendFailure && <WarmupSendFailureNote failure={sendFailure} provider={provider} cloud className="pl-10" />}

@@ -1347,6 +1347,12 @@ func main() {
 				streamingPublisher.PublishAccountSynced(ctx, orgID, acc.UserID, acc.ID.String(), acc.Email, acc.Provider, acc.Status)
 			}
 		})
+		// A refusal kept or cleared here also reaches teammates' open dashboards.
+		cloudLinkService.OnEnrollmentRefusalChange(func(ctx context.Context, id uuid.UUID) {
+			if acc, xerr := emailRepostory.GetByID(ctx, id); xerr == nil && acc != nil && acc.OrganizationID != nil {
+				streamingPublisher.PublishAccountSynced(ctx, acc.OrganizationID.String(), acc.UserID, acc.ID.String(), acc.Email, acc.Provider, acc.Status)
+			}
+		})
 
 		rateLimitRepository := repository.NewRateLimitRepository(primaryDB)
 		rateLimitService = ratelimit.NewService(cache, rateLimitRepository)

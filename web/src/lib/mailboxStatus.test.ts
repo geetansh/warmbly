@@ -84,8 +84,10 @@ describe("one mailbox's Warmbly Cloud standing", () => {
     }) as AccountStatus;
 
     it("names why it is not known, keyed off the enrollment state", () => {
-        expect(cloudStandingGap(row("a", { enrollment_state: "pending_enroll", cloud: null, enrollment_error: conflict }))).toEqual({ kind: "enrolling", error: conflict });
-        expect(cloudStandingGap(row("a", { enrollment_state: "pending_enroll", cloud: null }))).toEqual({ kind: "enrolling", error: null });
+        expect(cloudStandingGap(row("a", { enrollment_state: "pending_enroll", cloud: null, enrollment_error: conflict }))).toEqual({ kind: "enrolling", error: conflict, update: false });
+        expect(cloudStandingGap(row("a", { enrollment_state: "pending_enroll", cloud: null }))).toEqual({ kind: "enrolling", error: null, update: false });
+        // A resend for a mailbox Cloud already holds, such as a new sign-in.
+        expect(cloudStandingGap(row("a", { enrollment_state: "pending_enroll", enrollment_error: conflict }))).toEqual({ kind: "enrolling", error: conflict, update: true });
         expect(cloudStandingGap(row("a", { enrollment_state: "pending_remove", cloud: null }))).toEqual({ kind: "removing" });
         expect(cloudStandingGap(row("a", { cloud: null }))).toEqual({ kind: "unreported" });
         expect(cloudStandingGap(row("a", { cloud: reported({ state: "blocked", score: 0, spam_score: 0, reason: "cloud_evidence_unavailable" }) }))).toEqual({ kind: "unreported" });
@@ -96,17 +98,30 @@ describe("one mailbox's Warmbly Cloud standing", () => {
     });
 
     it("surfaces Cloud's refusal, which is the actionable part", () => {
-        const copy = cloudStandingGapCopy({ kind: "enrolling", error: { code: "pool_link_mailbox_conflict", message: "The address exists" } });
-        expect(copy.refused).toBe(true);
-        expect(copy.label).toBe("Cloud refused");
-        expect(copy.title).toContain("The address exists.");
-        expect(cloudStandingGapCopy({ kind: "enrolling", error: null }).refused).toBe(false);
+        const error = { code: "pool_link_mailbox_conflict", message: "The address exists" };
+        const copy = cloudStandingGapCopy({ kind: "enrolling", error, update: false });
+        expect(copy).toMatchObject({ refused: true, label: "Cloud refused" });
+        expect(copy.title).toContain("has not accepted this mailbox: The address exists.");
+        expect(cloudStandingGapCopy({ kind: "enrolling", error: null, update: false })).toMatchObject({ refused: false, label: "Enrolling" });
     });
 
-    it("counts a lone unknown-standing warning as pending Cloud, and anything more as an issue", () => {
+    it("words a refused resend as an update Cloud did not take, not a mailbox it never accepted", () => {
+        const copy = cloudStandingGapCopy({ kind: "enrolling", error: { code: "pool_link_invalid_credentials", message: "Sign-in failed" }, update: true });
+        expect(copy).toMatchObject({ refused: true, label: "Update refused" });
+        expect(copy.title).not.toContain("has not accepted this mailbox");
+        expect(copy.title).toContain("keeps the copy it already had");
+        expect(cloudStandingGapCopy({ kind: "enrolling", error: null, update: true }).label).toBe("Updating");
+    });
+
+    it("counts a lone unknown-standing warning as pending Cloud, a kept refusal and anything more as needing attention", () => {
+        const enrolling = row("a", { enrollment_state: "pending_enroll", cloud: null });
+        expect(mailboxReading(box("a"), unknown("a"), enrolling)).toBe("pending_cloud");
+        expect(mailboxReading(box("a"), healthy("a"), enrolling)).toBe("pending_cloud");
+        expect(mailboxReading(box("a"), unknown("a"), row("a", { cloud: null }))).toBe("pending_cloud");
+        expect(mailboxReading(box("a"), unknown("a"), row("a", { enrollment_state: "pending_remove", cloud: null }))).toBe("pending_cloud");
+        // A conflict never clears on its own, so it is not merely waiting.
         const stuck = row("a", { enrollment_state: "pending_enroll", cloud: null, enrollment_error: conflict });
-        expect(mailboxReading(box("a"), unknown("a"), stuck)).toBe("pending_cloud");
-        expect(mailboxReading(box("a"), healthy("a"), stuck)).toBe("pending_cloud");
+        expect(mailboxReading(box("a"), unknown("a"), stuck)).toBe("cloud_refused");
         const another = { ...unknown("a"), health: { status: "warning", score: 80, issues: ["Warmbly Cloud status unavailable", "Low inbox placement"] } } as AccountStatus;
         expect(mailboxReading(box("a"), another, stuck)).toBe("issue");
         const failing = { ...unknown("a"), errors: [{ id: "e", error_code: "AUTH", severity: "CRITICAL", title: "Sign-in failed", message: "", created_at: new Date() }] } as AccountStatus;
@@ -127,8 +142,9 @@ describe("one mailbox's Warmbly Cloud standing", () => {
         ]);
         const statuses = new Map(ids.map((id) => [id, ["a", "b", "c"].includes(id) ? unknown(id) : healthy(id)]));
         statuses.set("f", { ...healthy("f"), health: { status: "error", score: 40, issues: ["Account is not active"] } } as AccountStatus);
+        // Two kept conflicts need attention beside f's real error; c only waits on Cloud.
         expect(tallyMailboxes(boxes, (id) => statuses.get(id), (id) => rows.get(id))).toEqual({
-            total: 9, healthy: 4, warming: 1, issues: 1, pendingCloud: 3,
+            total: 9, healthy: 4, warming: 1, issues: 3, pendingCloud: 1,
         });
     });
 

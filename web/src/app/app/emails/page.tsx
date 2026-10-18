@@ -205,6 +205,7 @@ export default function AddressesPage() {
         return m;
     }, [accountStatuses]);
     const statusChecking = emailsData.isLoading || cloudChecking || statuses.isLoading || statuses.isFetching;
+    const emailById = useMemo(() => new Map((emailsData.emails ?? []).map((e) => [e.id, e])), [emailsData.emails]);
     const inventoryUnavailable = !emailsData.isLoading && (emailsData.isError || emailsData.isIncomplete);
     const statusUnavailable = inventoryUnavailable || cloud.unavailable || statuses.isError || (!statusChecking && visibleEmailIds.some((id) => !statusById.has(id)));
     const [lastReportedIssues, setLastReportedIssues] = React.useState<Map<string, { status: AccountStatus; observedAt: number }>>(new Map());
@@ -215,15 +216,18 @@ export default function AddressesPage() {
             for (const [id, issue] of next) if (now - issue.observedAt > LAST_REPORTED_ISSUE_MS) next.delete(id);
             for (const { status, observedAt, current } of statuses.observations ?? []) {
                 if (!observedAt || now - observedAt > LAST_REPORTED_ISSUE_MS || observedAt < (next.get(status.id)?.observedAt ?? 0)) continue;
-                if (status.errors?.length || (status.health && status.health.status !== "healthy")) {
+                const box = emailById.get(status.id);
+                const linked = cloudConnected ? cloudRowFor(status.id) : undefined;
+                // A Cloud gap is not an issue to remember: the row says it from the Cloud list, which a status refresh leaves alone.
+                if ((status.errors?.length || (status.health && status.health.status !== "healthy")) && (!box || mailboxReading(box, status, linked) === "issue")) {
                     next.set(status.id, { status, observedAt });
                 } else if (current && !cloudChecking && !cloudUnavailable) {
-                    if (!cloudStandingGap(cloudConnected ? cloudRowFor(status.id) : undefined, status)) next.delete(status.id);
+                    if (!cloudStandingGap(linked, status)) next.delete(status.id);
                 }
             }
             return next.size === previous.size && [...next].every(([id, value]) => previous.get(id)?.status === value.status && previous.get(id)?.observedAt === value.observedAt) ? previous : next;
         });
-    }, [statuses.observations, cloudChecking, cloudUnavailable, cloudConnected, cloudRowFor]);
+    }, [statuses.observations, cloudChecking, cloudUnavailable, cloudConnected, cloudRowFor, emailById]);
     useEffect(() => {
         let expiresAt = Infinity;
         for (const issue of lastReportedIssues.values()) expiresAt = Math.min(expiresAt, issue.observedAt + LAST_REPORTED_ISSUE_MS);
@@ -869,8 +873,12 @@ function MailboxRow({
     // This row's own Cloud standing; another mailbox waiting on Cloud changes nothing here.
     const cloudGap = cloudStandingGap(cloud, status);
     const gapCopy = cloudGap ? cloudStandingGapCopy(cloudGap) : null;
-    const gapOnly = !!status && mailboxReading(box, status, cloud) === "pending_cloud";
-    const healthShown = gapOnly ? { dot: "bg-slate-300", text: "text-slate-500", label: "Pending Cloud", pulse: false } : tone;
+    const reading = status ? mailboxReading(box, status, cloud) : null;
+    // The gap is the row's only finding, so health reads as the gap rather than a warning or a clean bill.
+    const gapOnly = reading === "pending_cloud" || reading === "cloud_refused";
+    const healthShown = reading === "cloud_refused" && gapCopy
+        ? { dot: "bg-amber-500", text: "text-amber-700", label: gapCopy.label, pulse: false }
+        : gapOnly ? { dot: "bg-slate-300", text: "text-slate-500", label: "Pending Cloud", pulse: false } : tone;
     const enrolling = cloudGap?.kind === "enrolling";
     const cloudRun = async (fn: () => Promise<unknown>, ok: string) => {
         try {
@@ -1068,7 +1076,11 @@ function MailboxRow({
                                     <CloudIcon className="w-2.5 h-2.5" />
                                     <span className="@4xl:hidden">{cloudPaused ? "Cloud paused" : "Cloud"}</span>
                                     <span className="hidden @4xl:inline">
-                                        {enrolling ? (gapCopy?.refused ? "Not accepted by Warmbly Cloud" : "Enrolling in Warmbly Cloud") : cloudGap?.kind === "removing" ? "Leaving Warmbly Cloud" : cloudPaused ? "Cloud warmup paused" : "Warmed by Warmbly Cloud"}
+                                        {cloudGap?.kind === "enrolling"
+                                            ? cloudGap.update
+                                                ? gapCopy?.refused ? "Update not accepted by Warmbly Cloud" : "Updating in Warmbly Cloud"
+                                                : gapCopy?.refused ? "Not accepted by Warmbly Cloud" : "Enrolling in Warmbly Cloud"
+                                            : cloudGap?.kind === "removing" ? "Leaving Warmbly Cloud" : cloudPaused ? "Cloud warmup paused" : "Warmed by Warmbly Cloud"}
                                     </span>
                                 </span>
                             )}

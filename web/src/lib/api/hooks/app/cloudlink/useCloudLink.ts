@@ -71,7 +71,8 @@ export function useEnrollCloudLinkMailbox() {
     const qc = useQueryClient();
     return useMutation({
         mutationFn: (id: string) => enrollCloudLinkMailbox(id),
-        onSuccess: () => {
+        // A refusal is kept on the row too, so it refetches either way.
+        onSettled: () => {
             void qc.invalidateQueries({ queryKey: CLOUD_LINK_KEY });
             void qc.invalidateQueries({ queryKey: ["emails"] });
         },
