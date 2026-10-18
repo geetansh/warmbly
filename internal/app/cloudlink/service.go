@@ -110,13 +110,19 @@ type Service interface {
 	WarmupPlacementData(ctx context.Context, orgID uuid.UUID, id *uuid.UUID, from, to time.Time) (*models.WarmupPlacementData, *errx.Error)
 	Enroll(ctx context.Context, orgID, accountID uuid.UUID) (*models.CloudLinkMailboxRow, *errx.Error)
 	Unenroll(ctx context.Context, orgID, accountID uuid.UUID) *errx.Error
-	// RefreshCredentials re-sends an enrolled mailbox's credential and ramp after they change here.
+	// RefreshCredentials re-sends an enrolled mailbox's credential after it changes here; the cloud keeps its ramp.
 	RefreshCredentials(ctx context.Context, orgID, accountID uuid.UUID) *errx.Error
 	// RevokeForDelete releases the mailbox on the cloud, credential and link
 	// alike, without ever calling back into the email service.
 	RevokeForDelete(ctx context.Context, orgID, accountID uuid.UUID) *errx.Error
 	SetLifecycle(ctx context.Context, orgID, accountID uuid.UUID, action string) (*models.CloudLinkMailboxRow, *errx.Error)
 	SetParticipation(ctx context.Context, orgID, accountID uuid.UUID, participation models.DiagnosticParticipation) (*models.CloudLinkMailboxRow, *errx.Error)
+	// RelayWarmupSettings sends a settings change to the cloud, which owns them, and mirrors its answer locally.
+	RelayWarmupSettings(ctx context.Context, orgID, accountID uuid.UUID, want models.PoolLinkWarmupSettings, lifecycle string) (*models.PoolLinkWarmupSettings, *errx.Error)
+	// SyncWarmupSettings refreshes every enrolled mailbox's local copy of its cloud settings and returns those that changed.
+	SyncWarmupSettings(ctx context.Context) ([]uuid.UUID, *errx.Error)
+	// OnSettingsChange registers the mailboxes whose mirrored settings changed.
+	OnSettingsChange(func(context.Context, []uuid.UUID))
 
 	// Root redirects Warmbly Cloud serves for this instance (redirects.go).
 	RedirectOffer(ctx context.Context, orgID uuid.UUID) (*models.PoolLinkRedirectOffer, bool)
@@ -178,6 +184,7 @@ type service struct {
 
 	disconnected    []func(context.Context, uuid.UUID)
 	standingChanged func(context.Context, models.CloudLinkStandingChange)
+	settingsChanged func(context.Context, []uuid.UUID)
 }
 
 func (s *service) OnStandingChange(fn func(context.Context, models.CloudLinkStandingChange)) {
@@ -509,12 +516,26 @@ func (s *service) ListMailboxes(ctx context.Context, orgID uuid.UUID) ([]models.
 				continue
 			}
 			var states []models.PoolLinkMailboxState
+			listedAt := time.Now()
 			if xerr := s.clientFor(l).do(ctx, http.MethodGet, "/instance/mailboxes", nil, &states); xerr == nil {
 				byRemote := map[uuid.UUID]*models.PoolLinkMailboxState{}
 				for i := range states {
 					byRemote[states[i].RemoteID] = &states[i]
 				}
+				reported := map[uuid.UUID]models.PoolLinkWarmupSettings{}
 				for _, e := range group {
+					if state := byRemote[e.RemoteID]; state != nil && e.EnrollmentState != "pending_remove" && state.Settings.Reported() {
+						reported[e.EmailAccountID] = state.Settings
+					}
+				}
+				if _, err := s.mirror(ctx, listedAt, reported); err != nil {
+					log.Warn().Err(err).Str("instance_id", instanceID.String()).Msg("cloud link: warmup settings could not be mirrored")
+				}
+				for _, e := range group {
+					if _, ok := reported[e.EmailAccountID]; ok && (e.SettingsObservedAt == nil || listedAt.After(*e.SettingsObservedAt)) {
+						at := listedAt
+						e.SettingsObservedAt = &at
+					}
 					state := byRemote[e.RemoteID]
 					cloudByAccount[e.EmailAccountID] = state
 					if state == nil || state.Health == nil || !knownHealthState(state.Health.State) {
@@ -557,6 +578,7 @@ func (s *service) ListMailboxes(ctx context.Context, orgID uuid.UUID) ([]models.
 			row.Managed = e.Managed
 			row.EnrollmentState = e.EnrollmentState
 			row.StandingObservedAt = e.StandingObservedAt
+			row.SettingsObservedAt = e.SettingsObservedAt
 			row.Cloud = cloudByAccount[a.ID]
 			// The recorded standing covers a mailbox the cloud holds out of its pool.
 			if row.Cloud != nil {
@@ -651,15 +673,24 @@ func (s *service) Enroll(ctx context.Context, orgID, accountID uuid.UUID) (*mode
 	if l.DisconnectPending {
 		return nil, ErrAlreadyLinked
 	}
+	// The cloud owns the ramp once it holds the mailbox, so only a first enrollment proposes one.
+	warmup := models.PoolLinkWarmupSettings{Timezone: acc.ClockTimezone()}
+	if m == nil || m.EnrollmentState == "pending_enroll" && m.SettingsObservedAt == nil {
+		days := acc.WarmupDays
+		if days == 0 {
+			days = models.WarmupEveryDay
+		}
+		warmup = models.PoolLinkWarmupSettings{
+			Base: acc.WarmupBase, Max: acc.WarmupMax, Increase: acc.WarmupIncrease, ReplyRate: acc.WarmupReplyRate,
+			StartTime: models.ClockHHMM(acc.WarmupStartTime), EndTime: models.ClockHHMM(acc.WarmupEndTime), Days: days, Timezone: acc.ClockTimezone(),
+		}
+	}
 	req := models.PoolLinkEnrollRequest{
 		RemoteID: acc.ID,
 		Email:    acc.Email,
 		Name:     acc.Name,
 		Provider: models.InboxProvider(acc.Provider),
-		Warmup: models.PoolLinkWarmupSettings{
-			Base: acc.WarmupBase, Max: acc.WarmupMax, Increase: acc.WarmupIncrease, ReplyRate: acc.WarmupReplyRate,
-			StartTime: models.ClockHHMM(acc.WarmupStartTime), EndTime: models.ClockHHMM(acc.WarmupEndTime), Days: acc.WarmupDays, Timezone: acc.ClockTimezone(),
-		},
+		Warmup:   warmup,
 	}
 	switch req.Provider {
 	case models.InboxProviderSMTPIMAP:
@@ -689,6 +720,7 @@ func (s *service) Enroll(ctx context.Context, orgID, accountID uuid.UUID) (*mode
 	}
 	s.syncLocalPool(ctx, acc.ID)
 	s.recordStanding(ctx, acc.ID, state.Health, true)
+	s.mirrorReported(ctx, acc.ID, &state)
 	return s.row(ctx, orgID, accountID)
 }
 

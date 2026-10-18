@@ -199,6 +199,7 @@ func (s *service) completeManagedConsent(ctx context.Context, l *models.CloudLin
 	} else if _, ok := s.recordStanding(ctx, acc.ID, state.Health, true); !ok {
 		return nil, errx.InternalError()
 	}
+	s.mirrorReported(ctx, acc.ID, &state)
 	if err := r.SetManagedConsentState(ctx, c.OrganizationID, c.ID, "active", &acc.ID); err != nil {
 		return nil, errx.InternalError()
 	}
