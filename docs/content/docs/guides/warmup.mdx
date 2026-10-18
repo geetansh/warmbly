@@ -280,6 +280,8 @@ Mail that arrives somewhere unexpected is still handled. A server-side rule, or 
 
 Filing happens as each message arrives, so changing the setting applies to warmup from that point on.
 
+On a self-hosted instance, [Warmbly Cloud](/guides/warmbly-cloud/) files the warmup mail it sends a mailbox enrolled there, and your instance queues no filing of its own for that mailbox, because its workers take no warmup action on a mailbox the cloud warms. Your instance still keeps recognised warmup mail out of your Unibox. Warmup mail from your instance's own pool that was waiting to be filed when the mailbox was enrolled, or that arrives afterwards, is not filed by either side: it stays where it landed, and its pending filing is dropped. While an enrollment is still starting or being removed, filings wait in the recovery queue, and run if the mailbox ends up staying with your instance.
+
 If filing fails, it is not reported as completed. An updated worker can release that filing command for later retry only after the backend confirms that the exact filing is still in its durable recovery queue. Recovery retries use the current worker assignment and folder setting, spaced by 5, 15 or 30 minutes as the queued filing ages. Unknown recovery authority keeps the existing command retry behavior. This does not resend mail, clear uncertain-send protection, acknowledge mailbox arrivals, or discard retention deletes and removal checks.
 
 A sweep identifies missed application-owned diagnostics and applies authorized housekeeping. It does not establish retroactive authentication or engagement. Leaving mail in the inbox remains an owner choice.

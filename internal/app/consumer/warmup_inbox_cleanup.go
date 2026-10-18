@@ -232,6 +232,16 @@ func (s *JobsService) fileWarmupOutOfMailbox(ctx context.Context, e *models.JobE
 			return fmt.Errorf("%w: remember warmup message: %w", errWarmupVerification, err)
 		}
 	}
+	if s.CloudLink != nil {
+		// A filing for a mailbox still enrolling or leaving the cloud is kept; the retry loop parks it until then.
+		cloudFiles, err := s.CloudLink.FilesWarmupMail(ctx, account.ID)
+		if err != nil {
+			return fmt.Errorf("%w: cloud enrollment lookup: %w", errWarmupVerification, err)
+		}
+		if cloudFiles {
+			return nil // Warmbly Cloud files the mail it warms; workers admit no local filing for it.
+		}
+	}
 	placement, folder := account.WarmupFiling()
 	if placement == models.WarmupPlacementInbox {
 		return nil

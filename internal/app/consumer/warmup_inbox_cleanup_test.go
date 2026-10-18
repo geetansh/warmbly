@@ -23,6 +23,8 @@ type sweepCloud struct {
 
 func (c *sweepCloud) CheckEnrollment(context.Context, uuid.UUID) (bool, error) { return true, nil }
 
+func (c *sweepCloud) FilesWarmupMail(context.Context, uuid.UUID) (bool, error) { return true, nil }
+
 func (c *sweepCloud) VerifyWarmupToken(context.Context, uuid.UUID, string) (bool, error) {
 	return false, nil
 }

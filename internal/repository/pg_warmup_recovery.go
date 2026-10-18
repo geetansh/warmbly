@@ -18,6 +18,7 @@ type WarmupRecoveryRepository interface {
 	EnqueueFiling(ctx context.Context, action models.WarmupEmailAction) (uuid.UUID, error)
 	ClaimFilings(ctx context.Context, limit int) ([]models.WarmupEmailAction, error)
 	CompleteFiling(ctx context.Context, accountID, filingID uuid.UUID) error
+	DropCloudFilings(ctx context.Context) (int64, error)
 	PurgeExpiredIdentifiers(ctx context.Context) error
 }
 
@@ -114,6 +115,7 @@ func (r *warmupRecoveryRepository) ClaimFilings(ctx context.Context, limit int) 
 		WHERE id IN (SELECT f.id FROM warmup_pending_filings f
 		  JOIN email_accounts a ON a.id = f.email_account_id
 		  WHERE f.next_attempt_at <= NOW() AND (f.provider_retry_at IS NULL OR f.provider_retry_at <= NOW()) AND a.worker_id IS NOT NULL
+		    AND NOT EXISTS (SELECT 1 FROM cloud_link_mailboxes c WHERE c.email_account_id = f.email_account_id)
 		  ORDER BY f.next_attempt_at LIMIT $1 FOR UPDATE OF f SKIP LOCKED)
 		RETURNING id, payload`, limit)
 	if err != nil {
@@ -140,6 +142,18 @@ func (r *warmupRecoveryRepository) ClaimFilings(ctx context.Context, limit int) 
 func (r *warmupRecoveryRepository) CompleteFiling(ctx context.Context, accountID, filingID uuid.UUID) error {
 	_, err := r.db.Exec(ctx, `DELETE FROM warmup_pending_filings WHERE id = $1 AND email_account_id = $2`, filingID, accountID)
 	return err
+}
+
+// DropCloudFilings removes filings for actively Cloud-warmed mailboxes; a pending enrollment's stay parked by ClaimFilings.
+func (r *warmupRecoveryRepository) DropCloudFilings(ctx context.Context) (int64, error) {
+	tag, err := r.db.Exec(ctx, `DELETE FROM warmup_pending_filings WHERE id IN (
+		SELECT f.id FROM warmup_pending_filings f
+		 WHERE EXISTS (SELECT 1 FROM cloud_link_mailboxes c WHERE c.email_account_id = f.email_account_id AND c.enrollment_state = 'active')
+		 LIMIT 1000)`)
+	if err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected(), nil
 }
 
 func (r *warmupRecoveryRepository) PurgeExpiredIdentifiers(ctx context.Context) error {
