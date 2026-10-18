@@ -18,6 +18,9 @@ type recoveryStub struct {
 	queued    []models.WarmupEmailAction
 	completed []uuid.UUID
 	err       error
+	dropped   int64
+	dropErr   error
+	calls     []string
 }
 
 func (r *recoveryStub) IsKnown(context.Context, uuid.UUID, string, []string) (bool, error) {
@@ -37,7 +40,18 @@ func (r *recoveryStub) EnqueueFiling(_ context.Context, action models.WarmupEmai
 }
 
 func (r *recoveryStub) ClaimFilings(context.Context, int) ([]models.WarmupEmailAction, error) {
+	r.calls = append(r.calls, "claim")
 	return r.queued, nil
+}
+
+func (r *recoveryStub) DropCloudFilings(context.Context) (int64, error) {
+	r.calls = append(r.calls, "drop")
+	return r.dropped, r.dropErr
+}
+
+func (r *recoveryStub) PurgeExpiredIdentifiers(context.Context) error {
+	r.calls = append(r.calls, "purge")
+	return nil
 }
 
 func (r *recoveryStub) CompleteFiling(_ context.Context, _ uuid.UUID, id uuid.UUID) error {
