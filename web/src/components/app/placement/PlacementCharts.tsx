@@ -307,6 +307,13 @@ export function ProviderBreakdown({ providers, browseScope }: { providers: Place
     }
     return (
         <div className="divide-y divide-slate-200/60">
+            <div className="px-5 pb-1.5 flex justify-end">
+                <span className="flex items-center gap-2 sm:gap-3 text-[9.5px] uppercase tracking-[0.1em] text-slate-400 font-medium whitespace-nowrap">
+                    <span className="w-14 text-right">Non-spam</span>
+                    <span className="hidden sm:inline w-12 text-right">Spam</span>
+                    <span className="w-14 text-right">Receipts</span>
+                </span>
+            </div>
             {providers.map((p) => {
                 const expanded = open === p.group;
                 const hosts = p.hosts.filter((h) => observedCount(h) > 0);
@@ -323,19 +330,25 @@ export function ProviderBreakdown({ providers, browseScope }: { providers: Place
                             },
                             <ChevronRightIcon className={cn("w-3 h-3 shrink-0 text-slate-300 transition-transform", expanded && "rotate-90", !canExpand && "invisible")} />,
                             <ProviderLogo id={GROUP_LOGO[p.group]} size="sm" />,
-                            <span className="text-[12.5px] font-medium text-slate-900 w-24 sm:w-32 shrink-0 truncate">{GROUP_LABEL[p.group]}</span>,
+                            <span className="w-24 sm:w-32 shrink-0 min-w-0 leading-tight">
+                                <span className="block text-[12.5px] font-medium text-slate-900 truncate">{GROUP_LABEL[p.group]}</span>
+                                {hosts.length > 1 && <span className="block text-[10.5px] text-slate-400 truncate">{hosts.length} hosts combined</span>}
+                            </span>,
                             <PlacementBar inbox={p.inbox} tabs={p.tabs} spam={p.spam} unknown={p.unknown} archived={p.archived} custom={p.custom} />,
                             <RateCells inbox={p.inbox_rate} spam={p.spam_rate} delivered={p.delivered} />,
                         )}
                         {expanded && (
-                            <div className="bg-slate-50/50 divide-y divide-slate-200/40">
-                                {hosts.map((h) => (
-                                    <div key={h.host || "unknown"} className="min-h-9 pl-14 pr-5 py-1.5 flex items-center gap-3">
-                                        <span className="text-[11.5px] text-slate-600 w-24 sm:w-32 shrink-0 truncate">{mailHostLabel(h.host) || "Host not detected"}</span>
-                                        <PlacementBar inbox={h.inbox} tabs={h.tabs} spam={h.spam} unknown={h.unknown} archived={h.archived} custom={h.custom} height={4} />
-                                        <RateCells inbox={h.inbox_rate} spam={h.spam_rate} delivered={h.delivered} />
-                                    </div>
-                                ))}
+                            // Hosts are the group's parts: nested under it, each counted against the group's total.
+                            <div className="bg-slate-50/50 pb-1.5">
+                                <div className="ml-[53px] border-l border-slate-200">
+                                    {hosts.map((h) => (
+                                        <div key={h.host || "unknown"} className="min-h-9 pl-3 pr-5 py-1.5 flex items-center gap-3">
+                                            <span className="text-[11.5px] text-slate-600 w-[6.5rem] sm:w-[8.5rem] shrink-0 truncate">{mailHostLabel(h.host) || "Host not detected"}</span>
+                                            <PlacementBar inbox={h.inbox} tabs={h.tabs} spam={h.spam} unknown={h.unknown} archived={h.archived} custom={h.custom} height={4} />
+                                            <RateCells inbox={h.inbox_rate} spam={h.spam_rate} delivered={h.delivered} of={p.delivered} />
+                                        </div>
+                                    ))}
+                                </div>
                             </div>
                         )}
                     </div>
@@ -365,12 +378,18 @@ function PlacementBar({ inbox, tabs, spam, unknown, archived, custom, height = 6
     );
 }
 
-function RateCells({ inbox, spam, delivered }: { inbox: number | null; spam: number | null; delivered: number }) {
+// `of` is the parent group's receipts, for a host row.
+function RateCells({ inbox, spam, delivered, of }: { inbox: number | null; spam: number | null; delivered: number; of?: number }) {
     return (
-        <span className="flex items-center gap-2 sm:gap-3 font-mono text-[11px] tabular-nums shrink-0">
-            <span title="Non-spam share among classified receipts (includes tabs)" className={BAND[bandForRate(inbox)].text}>{fmtPct(inbox)}</span>
-            <span title="Spam rate" className="hidden sm:inline text-rose-600 w-12 text-right">{fmtPct(spam)} spam</span>
-            <span title="Classified receipts" className="text-slate-400 w-10 text-right">{fmtNum(delivered)}</span>
+        <span className="flex items-center gap-2 sm:gap-3 font-mono text-[11px] tabular-nums shrink-0 whitespace-nowrap">
+            <span title="Non-spam share among classified receipts (includes tabs)" className={cn("w-14 text-right", BAND[bandForRate(inbox)].text)}>{fmtPct(inbox)}</span>
+            <span title="Spam rate" className="hidden sm:inline text-rose-600 w-12 text-right">{fmtPct(spam)}</span>
+            <span
+                title={of != null ? `${fmtNum(delivered)} of the group's ${fmtNum(of)} classified receipts` : "Classified receipts"}
+                className="text-slate-400 w-14 text-right"
+            >
+                {of != null ? `${fmtNum(delivered)}/${fmtNum(of)}` : fmtNum(delivered)}
+            </span>
         </span>
     );
 }
