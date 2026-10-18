@@ -1,6 +1,16 @@
 import { describe, expect, it } from "vitest";
 import type AccountStatus from "@/lib/api/models/app/analytics/AccountStatus";
-import { cloudStandingUnavailable, mailboxActivityLabel, mailboxColdActivity } from "./mailboxStatus";
+import type { CloudLinkMailboxRow, PoolLinkMailboxState } from "@/lib/api/models/app/cloudlink/CloudLink";
+import type Inbox from "@/lib/api/models/app/emails/Inbox";
+import {
+    cloudStandingGap,
+    cloudStandingGapCopy,
+    cloudStandingUnavailable,
+    mailboxActivityLabel,
+    mailboxColdActivity,
+    mailboxReading,
+    tallyMailboxes,
+} from "./mailboxStatus";
 
 type Activity = Pick<AccountStatus, "send_lifecycle" | "in_campaign">;
 
@@ -53,5 +63,77 @@ describe("Cloud standing availability", () => {
         expect(cloudStandingUnavailable({ reason: "complaints" })).toBe(false);
         expect(cloudStandingUnavailable(null)).toBe(false);
         expect(cloudStandingUnavailable(undefined)).toBe(false);
+    });
+});
+
+describe("one mailbox's Warmbly Cloud standing", () => {
+    const conflict = { code: "pool_link_mailbox_conflict", message: "This address already exists in the linked Cloud workspace. Contact Warmbly support." };
+    const reported = (state: PoolLinkMailboxState["health"]) => ({ health: state, warmup: { enabled: true, paused: false } }) as PoolLinkMailboxState;
+    const row = (id: string, over: Partial<CloudLinkMailboxRow> = {}): CloudLinkMailboxRow => ({
+        id, email: `${id}@test.example`, name: "", provider: "smtp_imap", status: "active",
+        enrolled: true, managed: false, enrollment_state: "active",
+        cloud: reported({ state: "healthy", score: 100, spam_score: 0 }), ...over,
+    });
+    const box = (id: string, over: Partial<Inbox> = {}) => ({ id, email: `${id}@test.example`, status: "active", auth_state: "passing", ...over }) as Inbox;
+    const healthy = (id: string): AccountStatus => ({ id, health: { status: "healthy", score: 100, issues: [] }, errors: [], in_campaign: false }) as unknown as AccountStatus;
+    // What the backend reports while Cloud has no current status: a warning with exactly that one issue.
+    const unknown = (id: string): AccountStatus => ({
+        ...healthy(id),
+        health: { status: "warning", score: 100, issues: ["Warmbly Cloud status unavailable"] },
+        warmup_health: { state: "blocked", reason: "cloud_evidence_unavailable" },
+    }) as AccountStatus;
+
+    it("names why it is not known, keyed off the enrollment state", () => {
+        expect(cloudStandingGap(row("a", { enrollment_state: "pending_enroll", cloud: null, enrollment_error: conflict }))).toEqual({ kind: "enrolling", error: conflict });
+        expect(cloudStandingGap(row("a", { enrollment_state: "pending_enroll", cloud: null }))).toEqual({ kind: "enrolling", error: null });
+        expect(cloudStandingGap(row("a", { enrollment_state: "pending_remove", cloud: null }))).toEqual({ kind: "removing" });
+        expect(cloudStandingGap(row("a", { cloud: null }))).toEqual({ kind: "unreported" });
+        expect(cloudStandingGap(row("a", { cloud: reported({ state: "blocked", score: 0, spam_score: 0, reason: "cloud_evidence_unavailable" }) }))).toEqual({ kind: "unreported" });
+        expect(cloudStandingGap(row("a"))).toBeNull();
+        expect(cloudStandingGap(row("a", { enrolled: false, cloud: null }))).toBeNull();
+        expect(cloudStandingGap(undefined, unknown("a"))).toEqual({ kind: "unreported" });
+        expect(cloudStandingGap(undefined, healthy("a"))).toBeNull();
+    });
+
+    it("surfaces Cloud's refusal, which is the actionable part", () => {
+        const copy = cloudStandingGapCopy({ kind: "enrolling", error: { code: "pool_link_mailbox_conflict", message: "The address exists" } });
+        expect(copy.refused).toBe(true);
+        expect(copy.label).toBe("Cloud refused");
+        expect(copy.title).toContain("The address exists.");
+        expect(cloudStandingGapCopy({ kind: "enrolling", error: null }).refused).toBe(false);
+    });
+
+    it("counts a lone unknown-standing warning as pending Cloud, and anything more as an issue", () => {
+        const stuck = row("a", { enrollment_state: "pending_enroll", cloud: null, enrollment_error: conflict });
+        expect(mailboxReading(box("a"), unknown("a"), stuck)).toBe("pending_cloud");
+        expect(mailboxReading(box("a"), healthy("a"), stuck)).toBe("pending_cloud");
+        const another = { ...unknown("a"), health: { status: "warning", score: 80, issues: ["Warmbly Cloud status unavailable", "Low inbox placement"] } } as AccountStatus;
+        expect(mailboxReading(box("a"), another, stuck)).toBe("issue");
+        const failing = { ...unknown("a"), errors: [{ id: "e", error_code: "AUTH", severity: "CRITICAL", title: "Sign-in failed", message: "", created_at: new Date() }] } as AccountStatus;
+        expect(mailboxReading(box("a"), failing, stuck)).toBe("issue");
+        expect(mailboxReading(box("a", { status: "inactive" }), unknown("a"), stuck)).toBe("issue");
+        expect(mailboxReading(box("a"), healthy("a"), row("a"))).toBe("warming");
+    });
+
+    it("keeps one stuck enrollment from hiding every other mailbox", () => {
+        const ids = ["a", "b", "c", "d", "e", "f", "g", "h", "i"];
+        const boxes = ids.map((id) => box(id, { warmup: null }));
+        const rows = new Map<string, CloudLinkMailboxRow>([
+            ["a", row("a", { enrollment_state: "pending_enroll", cloud: null, enrollment_error: conflict })],
+            ["b", row("b", { enrollment_state: "pending_enroll", cloud: null, enrollment_error: conflict })],
+            ["c", row("c", { enrollment_state: "pending_enroll", cloud: null })],
+            ["d", row("d")],
+            ["e", row("e", { cloud: { ...reported({ state: "healthy", score: 100, spam_score: 0 }), warmup: { enabled: true, paused: true } } as PoolLinkMailboxState })],
+        ]);
+        const statuses = new Map(ids.map((id) => [id, ["a", "b", "c"].includes(id) ? unknown(id) : healthy(id)]));
+        statuses.set("f", { ...healthy("f"), health: { status: "error", score: 40, issues: ["Account is not active"] } } as AccountStatus);
+        expect(tallyMailboxes(boxes, (id) => statuses.get(id), (id) => rows.get(id))).toEqual({
+            total: 9, healthy: 4, warming: 1, issues: 1, pendingCloud: 3,
+        });
+    });
+
+    it("leaves a mailbox with no status yet in the total only", () => {
+        const tally = tallyMailboxes([box("a"), box("b")], (id) => (id === "a" ? healthy(id) : undefined), () => undefined);
+        expect(tally).toEqual({ total: 2, healthy: 1, warming: 0, issues: 0, pendingCloud: 0 });
     });
 });
