@@ -117,3 +117,26 @@ func TestCloudReportsRefuseMailboxesOutsideTheLocalWorkspace(t *testing.T) {
 		t.Fatal("foreign mailbox was requested from Cloud")
 	}
 }
+
+func TestListPlacementRatesIncludeCloudWarmedMailboxes(t *testing.T) {
+	localID, cloudID := uuid.New(), uuid.New()
+	local := reportPlacementRepo{data: models.WarmupPlacementData{
+		Windows: map[uuid.UUID]models.WarmupPlacementWindow{localID: {Major: models.WarmupPlacementTally{Inbox: 20}, All: models.WarmupPlacementTally{Inbox: 20}}},
+	}}
+	cloud := &cloudWarmupStub{placement: &models.WarmupPlacementData{
+		Windows: map[uuid.UUID]models.WarmupPlacementWindow{cloudID: {Major: models.WarmupPlacementTally{Inbox: 3, Spam: 2}, All: models.WarmupPlacementTally{Inbox: 5, Spam: 2}}},
+	}}
+	s := &analyticsService{placementRepo: local, cloudReports: cloud}
+	rates := s.placementRates(context.Background(), uuid.New(), nil)
+	if r, ok := rates[cloudID]; !ok || r.Delivered != 5 || r.InboxRate != nil {
+		t.Fatalf("cloud-warmed mailbox missing from list rates: %+v", rates)
+	}
+	if r, ok := rates[localID]; !ok || r.InboxRate == nil {
+		t.Fatalf("local rate lost: %+v", rates)
+	}
+	cloud.failure = errx.ErrServiceDown
+	rates = s.placementRates(context.Background(), uuid.New(), nil)
+	if _, ok := rates[localID]; !ok || len(rates) != 1 {
+		t.Fatalf("a Cloud failure must leave local rates intact: %+v", rates)
+	}
+}
