@@ -41,7 +41,7 @@ func (s *JobsService) rebalanceLifecycles(ctx context.Context) {
 	seen := make([]uuid.UUID, 0, len(candidates))
 	for _, c := range candidates {
 		seen = append(seen, c.EmailAccountID)
-		d := lifecycle.Decide(c.Current, c.Since, c.HealthState, now)
+		d := lifecycle.Decide(c.Current, c.Since, c.HealthState, c.CloudEvidenceUnknown, now)
 		if d.RestartProbation {
 			if err := s.LifecycleRepo.RestartProbation(ctx, c.EmailAccountID); err != nil {
 				log.Warn().Err(err).Str("email_account_id", c.EmailAccountID.String()).

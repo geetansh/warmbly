@@ -15,6 +15,7 @@ import { providerSupported } from "@/app/app/settings/warmbly-cloud/providers";
 import WarmupPartnerDiversity from "./WarmupPartnerDiversity";
 import WarmupSendFailureNote from "./WarmupSendFailureNote";
 import { cloudSendFailure, cloudWarmupPaused } from "@/lib/cloudWarmup";
+import { cloudStandingUnavailable } from "@/lib/mailboxStatus";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { setCloudLinkParticipation } from "@/lib/api/client/app/cloudlink/cloudLink";
 import type { DiagnosticParticipation } from "@/lib/api/models/app/cloudlink/CloudLink";
@@ -82,7 +83,7 @@ export default function CloudWarmupCard({ mailboxId, email, provider }: { mailbo
 
     const p = cloud?.participation;
     const paused = cloudWarmupPaused(cloud) || !!p && !p.send;
-    const health = cloud?.health?.state;
+    const health = cloudStandingUnavailable(cloud?.health) ? "status unavailable" : cloud?.health?.state;
     return (
         <div className="px-5 py-4">
             <div className="rounded-md border border-sky-200/70 bg-sky-50/50 px-3 py-3">

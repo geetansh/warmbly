@@ -1316,8 +1316,9 @@ func main() {
 		emailService.WireCloudLink(cloudLinkRepository)
 		cloudLinkService = cloudlink.NewService(cloudLinkRepository, emailRepostory, emailService)
 		cloudLinkService.OnStandingChange(func(ctx context.Context, change models.CloudLinkStandingChange) {
-			state, _, err := warmupRepository.GetHealthState(ctx, change.EmailAccountID)
-			if err == nil {
+			state, cloudUnknown, err := warmupRepository.GetKnownHealthState(ctx, change.EmailAccountID)
+			// A missing Cloud report is no verdict; only a real hold beside it moves the band.
+			if err == nil && (!cloudUnknown || state.Holds()) {
 				err = workerRepository.SetEmailAccountRiskBand(ctx, change.EmailAccountID, models.RiskBandFromHealth(state))
 			}
 			if err != nil {

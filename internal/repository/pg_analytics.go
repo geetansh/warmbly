@@ -1063,6 +1063,7 @@ func (r *analyticsRepository) GetAccountHealthSummary(ctx context.Context, orgID
 						  AND eae.resolved_at IS NULL AND eae.severity = 'CRITICAL'
 					) THEN 'error'
 				WHEN wh.health_state = 'watch'
+					OR ` + cloudStandingUnknownSQL("ea.id") + `
 					OR EXISTS (
 						SELECT 1 FROM email_account_errors eae
 						WHERE eae.email_account_id = ea.id
@@ -1071,7 +1072,7 @@ func (r *analyticsRepository) GetAccountHealthSummary(ctx context.Context, orgID
 				ELSE 'healthy'
 			END AS status
 			FROM email_accounts ea
-			LEFT JOIN LATERAL (` + warmupStandingSQL("ea.id") + `
+			LEFT JOIN LATERAL (` + warmupKnownStandingSQL("ea.id") + `
 			) wh ON true
 			WHERE ea.organization_id = $1` + inMailboxes("ea.id", mailboxes, 2) + `
 		)

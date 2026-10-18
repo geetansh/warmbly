@@ -317,6 +317,11 @@ const (
 	WarmupHealthBlocked     WarmupHealthState = "blocked"
 )
 
+// Holds reports whether s takes a mailbox out of the pool and out of cold rotation.
+func (s WarmupHealthState) Holds() bool {
+	return s == WarmupHealthQuarantined || s == WarmupHealthBlocked
+}
+
 type WarmupParticipantHealth struct {
 	PoolID                uuid.UUID         `json:"pool_id"`
 	PoolType              string            `json:"pool_type"`

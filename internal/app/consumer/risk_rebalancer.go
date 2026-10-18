@@ -50,6 +50,10 @@ func (s *JobsService) rebalanceRisk(ctx context.Context) {
 	var updatedBand int
 
 	for _, c := range candidates {
+		// A missing Cloud report is no verdict; only a real hold beside it moves the band.
+		if c.CloudEvidenceUnknown && !c.HealthState.Holds() {
+			continue
+		}
 		newBand := models.RiskBandFromHealth(c.HealthState)
 		if newBand == c.CurrentBand {
 			continue

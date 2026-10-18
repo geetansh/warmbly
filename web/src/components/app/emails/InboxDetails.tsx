@@ -16,6 +16,7 @@ import React, { useMemo, useState } from "react";
 import useBrowseState from "@/hooks/useBrowseState";
 import { mailboxTab, type MailboxTab } from "@/lib/browse-accounts-analytics";
 import { diagnosticSendingAllowed, diagnosticWarmupActive } from "@/lib/diagnosticParticipation";
+import { cloudStandingUnavailable } from "@/lib/mailboxStatus";
 import { AnimatePresence, motion } from "framer-motion";
 import AdvisorStrip from "@/components/app/advisor/AdvisorStrip";
 import {
@@ -1250,6 +1251,7 @@ function AuthCheckPanel({ mailbox }: { mailbox: Inbox }) {
 function WarmupTab({ form, update, status, mailbox, canWarmup = true }: { form: Inbox; update: (p: Partial<Inbox>) => void; status?: AccountStatusModel; mailbox: Inbox; canWarmup?: boolean }) {
     const ws = status?.warmup_status;
     const wh = status?.warmup_health;
+    const whUnavailable = cloudStandingUnavailable(wh);
     const inCampaign = status?.in_campaign;
 
     // Warmup on/off is a lifecycle action (immediate), not a saved form field —
@@ -1416,15 +1418,21 @@ function WarmupTab({ form, update, status, mailbox, canWarmup = true }: { form: 
                                 </span>
                             )}
                         </div>
-                        <span className={cn("inline-flex items-center gap-1 text-[11px] font-medium", warmupStateTone[wh.state]?.text ?? "text-slate-500")}>
-                            <ShieldCheckIcon className="w-3.5 h-3.5" /> {warmupStateTone[wh.state]?.label ?? wh.state}
+                        <span className={cn("inline-flex items-center gap-1 text-[11px] font-medium", whUnavailable ? "text-amber-600" : (warmupStateTone[wh.state]?.text ?? "text-slate-500"))}>
+                            <ShieldCheckIcon className="w-3.5 h-3.5" /> {whUnavailable ? "Status unavailable" : (warmupStateTone[wh.state]?.label ?? wh.state)}
                         </span>
                     </div>
-                    {wh.reason && <p className="mt-1.5 text-[11.5px] text-slate-500 leading-relaxed">{wh.reason}</p>}
+                    {whUnavailable ? (
+                        <p className="mt-1.5 text-[11.5px] text-slate-500 leading-relaxed">
+                            Warmbly Cloud has not reported a current status for this mailbox. Campaigns on this instance wait for one before sending from it. This is not a block and does not lower its health.
+                        </p>
+                    ) : (
+                        wh.reason && <p className="mt-1.5 text-[11.5px] text-slate-500 leading-relaxed">{wh.reason}</p>
+                    )}
                     {wh.blocked_until && (
                         <p className="mt-1 text-[11px] text-rose-600">Paused from the pool until {new Date(wh.blocked_until).toLocaleDateString()}.</p>
                     )}
-                    {wh.source === "cloud" && wh.state !== "healthy" && (
+                    {wh.source === "cloud" && wh.state !== "healthy" && !whUnavailable && (
                         <p className="mt-1 text-[11px] text-slate-500 leading-relaxed">
                             {wh.state === "quarantined" || wh.state === "blocked"
                                 ? "Campaigns on this instance skip this mailbox while Warmbly Cloud holds it."
