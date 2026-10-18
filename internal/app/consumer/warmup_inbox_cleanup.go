@@ -24,7 +24,7 @@ func (s *JobsService) StartWarmupInboxCleanup(ctx context.Context) {
 	var nextPass time.Time
 	jobrun.Loop(ctx, "warmup_inbox_cleanup", time.Minute, true, func(ctx context.Context) error {
 		if time.Now().Before(nextPass) {
-			return nil
+			return jobrun.Quiet(sweep.heldError())
 		}
 		passCtx, cancel := context.WithTimeout(ctx, warmupCleanupPassBudget)
 		defer cancel()
@@ -32,7 +32,11 @@ func (s *JobsService) StartWarmupInboxCleanup(ctx context.Context) {
 		if done {
 			nextPass = sweep.finish(time.Now())
 		}
-		return err
+		if err != nil {
+			return err
+		}
+		// Already reported when it was held; the panel keeps showing it until the mailbox clears.
+		return jobrun.Quiet(sweep.heldError())
 	})
 }
 
@@ -45,17 +49,41 @@ const (
 	warmupCleanupPageSize         = 100
 	warmupCleanupPassChecks       = 100
 	warmupCleanupPassPages        = 10
+	// A row that outruns the pass this many times in a row holds its mailbox instead of stalling the sweep.
+	warmupCleanupMaxInterruptions = 2
 )
+
+// heldMailbox is a mailbox whose check failed, waiting to be retried from where it stopped.
+type heldMailbox struct {
+	resume  uuid.UUID // cursor before its first unfinished row
+	retries int       // retry sweeps in a row that finished none of its rows
+	due     time.Time
+	err     error
+}
 
 // warmupInboxSweep is the cleanup's position, carried across one-minute passes.
 type warmupInboxSweep struct {
 	afterID uuid.UUID
-	// held maps a mailbox whose check failed to the cursor before that row; the rest of it waits for a retry sweep.
-	held map[uuid.UUID]uuid.UUID
-	// only limits a retry sweep to the mailboxes the previous sweep held, each past its own resume point.
-	only    map[uuid.UUID]uuid.UUID
-	retries int
-	fullAt  time.Time
+	// held are the mailboxes this sweep stopped checking after a failure.
+	held map[uuid.UUID]heldMailbox
+	// only limits a retry sweep to the mailboxes due, each past its own resume point.
+	only map[uuid.UUID]heldMailbox
+	// waiting are held mailboxes whose retry is not due yet.
+	waiting map[uuid.UUID]heldMailbox
+	// progressed marks the mailboxes with a row finished this sweep.
+	progressed    map[uuid.UUID]bool
+	interruptedAt uuid.UUID
+	interruptions int
+	lastErr       error
+	fullAt        time.Time
+	now           func() time.Time
+}
+
+func (w *warmupInboxSweep) clock() time.Time {
+	if w.now != nil {
+		return w.now()
+	}
+	return time.Now()
 }
 
 func (w *warmupInboxSweep) wants(mailbox, id uuid.UUID) bool {
@@ -65,45 +93,107 @@ func (w *warmupInboxSweep) wants(mailbox, id uuid.UUID) bool {
 	if w.only == nil {
 		return true
 	}
-	resume, ok := w.only[mailbox]
-	return ok && bytes.Compare(id[:], resume[:]) > 0
+	h, ok := w.only[mailbox]
+	return ok && bytes.Compare(id[:], h.resume[:]) > 0
 }
 
-func (w *warmupInboxSweep) hold(mailbox uuid.UUID) {
+func (w *warmupInboxSweep) hold(mailbox uuid.UUID, err error) {
 	if w.held == nil {
-		w.held = map[uuid.UUID]uuid.UUID{}
+		w.held = map[uuid.UUID]heldMailbox{}
 	}
-	w.held[mailbox] = w.afterID
+	h := heldMailbox{resume: w.afterID, err: err}
+	if prev, ok := w.only[mailbox]; ok {
+		h.retries = prev.retries
+	}
+	w.held[mailbox], w.lastErr = h, err
 }
 
-// finish closes a sweep and returns when the next starts: a backed-off retry of the held mailboxes, else the next full sweep.
+// finished records a row that ran to completion, which counts as progress for its mailbox.
+func (w *warmupInboxSweep) finished(mailbox uuid.UUID) {
+	if w.progressed == nil {
+		w.progressed = map[uuid.UUID]bool{}
+	}
+	w.progressed[mailbox] = true
+	w.interruptions = 0
+}
+
+// interrupted notes a pass cut short on id and reports whether that row has now done it too often in a row.
+func (w *warmupInboxSweep) interrupted(id uuid.UUID) bool {
+	if w.interruptedAt == id {
+		w.interruptions++
+	} else {
+		w.interruptedAt, w.interruptions = id, 1
+	}
+	return w.interruptions >= warmupCleanupMaxInterruptions
+}
+
+// finish closes a sweep and returns when the next starts: a retry of the mailboxes due, else the next full sweep.
 func (w *warmupInboxSweep) finish(now time.Time) time.Time {
 	if w.only == nil {
-		w.fullAt, w.retries = now.Add(warmupCleanupInterval), 0
+		// A full sweep revisits every mailbox, so nothing held before it is still waiting.
+		w.fullAt, w.waiting = now.Add(warmupCleanupInterval), nil
 	}
-	held := w.held
-	w.afterID, w.held, w.only = uuid.Nil, nil, nil
-	retry := now.Add(warmupCleanupRetryDelay << w.retries)
-	if len(held) == 0 || !retry.Before(w.fullAt) {
-		return w.fullAt
+	if w.waiting == nil {
+		w.waiting = map[uuid.UUID]heldMailbox{}
 	}
-	w.retries++
-	w.only = held
-	first := true
-	for _, resume := range held {
-		if first || bytes.Compare(resume[:], w.afterID[:]) < 0 {
-			w.afterID, first = resume, false
+	for m, h := range w.held {
+		if w.progressed[m] {
+			// It finished rows before failing again, so it carries on rather than backing off.
+			h.retries, h.due = 0, now
+		} else {
+			h.due = now.Add(warmupCleanupRetryDelay << h.retries)
+			h.retries++
+		}
+		if h.due.Before(w.fullAt) {
+			w.waiting[m] = h
 		}
 	}
-	return retry
+	w.afterID, w.held, w.only, w.progressed = uuid.Nil, nil, nil, nil
+	if len(w.waiting) == 0 {
+		w.lastErr = nil
+		return w.fullAt
+	}
+	next := w.fullAt
+	for _, h := range w.waiting {
+		if h.due.Before(next) {
+			next = h.due
+		}
+	}
+	w.only = map[uuid.UUID]heldMailbox{}
+	first := true
+	for m, h := range w.waiting {
+		if h.due.After(next) {
+			continue
+		}
+		w.only[m] = h
+		delete(w.waiting, m)
+		if first || bytes.Compare(h.resume[:], w.afterID[:]) < 0 {
+			w.afterID, first = h.resume, false
+		}
+	}
+	return next
 }
 
-func warmupCleanupHasTime(ctx context.Context) bool {
+// heldError names the mailboxes still waiting on a retry, nil when there are none.
+func (w *warmupInboxSweep) heldError() error {
+	ids := map[uuid.UUID]bool{}
+	for _, set := range []map[uuid.UUID]heldMailbox{w.held, w.only, w.waiting} {
+		for id := range set {
+			ids[id] = true
+		}
+	}
+	if len(ids) == 0 || w.lastErr == nil {
+		return nil
+	}
+	return fmt.Errorf("warmup inbox cleanup holds %d mailbox(es) for retry: %w", len(ids), w.lastErr)
+}
+
+func (w *warmupInboxSweep) hasTime(ctx context.Context) bool {
 	if ctx.Err() != nil {
 		return false
 	}
 	deadline, ok := ctx.Deadline()
-	return !ok || time.Until(deadline) >= warmupCleanupCandidateReserve
+	return !ok || deadline.Sub(w.clock()) >= warmupCleanupCandidateReserve
 }
 
 // fileWarmupOutOfMailbox persists filing separately from best-effort engagement.
@@ -200,11 +290,12 @@ func (s *JobsService) retryPendingWarmupVerification(ctx context.Context) error 
 }
 
 // cleanWarmupInboxBatch runs one pass and reports whether the sweep reached the end.
+// cleanWarmupInboxBatch runs one pass and reports whether the sweep reached the end.
 func (s *JobsService) cleanWarmupInboxBatch(ctx context.Context, sweep *warmupInboxSweep) (bool, error) {
 	var failures []error
 	checked := 0
 	for range warmupCleanupPassPages {
-		if !warmupCleanupHasTime(ctx) {
+		if !sweep.hasTime(ctx) {
 			return false, warmupCleanupFailures(failures)
 		}
 		events, err := s.UniboxRepository.ListWarmupReviewCandidates(ctx, sweep.afterID, warmupCleanupPageSize)
@@ -216,22 +307,29 @@ func (s *JobsService) cleanWarmupInboxBatch(ctx context.Context, sweep *warmupIn
 				sweep.afterID = e.Message.ID
 				continue
 			}
-			if checked == warmupCleanupPassChecks || !warmupCleanupHasTime(ctx) {
+			if checked == warmupCleanupPassChecks || !sweep.hasTime(ctx) {
 				return false, warmupCleanupFailures(failures)
 			}
 			checked++
-			if err := s.cleanWarmupCandidate(ctx, e); err != nil {
-				if ctx.Err() != nil {
-					// The pass ran out, not the mailbox: this row is the first one retried.
-					return false, errors.Join(warmupCleanupFailures(failures), err)
-				}
-				// One mailbox's failing checks must not stall every mailbox sorted after it.
-				sweep.hold(e.Message.EmailID)
-				log.Warn().Err(err).Str("email_account_id", e.Message.EmailID.String()).
-					Msg("warmup inbox cleanup held a mailbox for retry")
-				failures = append(failures, err)
+			err := s.cleanWarmupCandidate(ctx, e)
+			if err == nil {
+				sweep.finished(e.Message.EmailID)
+				sweep.afterID = e.Message.ID
+				continue
 			}
+			if ctx.Err() != nil && !sweep.interrupted(e.Message.ID) {
+				// The pass ran out, not the mailbox: this row is the first one retried.
+				return false, errors.Join(warmupCleanupFailures(failures), err)
+			}
+			// One mailbox's failing checks, or a row that keeps outrunning the pass, must not stall every mailbox after it.
+			sweep.hold(e.Message.EmailID, err)
 			sweep.afterID = e.Message.ID
+			log.Warn().Err(err).Str("email_account_id", e.Message.EmailID.String()).
+				Msg("warmup inbox cleanup held a mailbox for retry")
+			failures = append(failures, err)
+			if ctx.Err() != nil {
+				return false, warmupCleanupFailures(failures)
+			}
 		}
 		if len(events) < warmupCleanupPageSize {
 			return true, warmupCleanupFailures(failures)
