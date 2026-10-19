@@ -1062,6 +1062,7 @@ If a new feature requires heavy joins, admin queries, billing checks, or complex
 - do not add direct Postgres usage to `cmd/worker` or `internal/app/worker` unless explicitly required
 - preserve worker-specific Kafka topic routing
 - do not reintroduce worker categories; placement is a score over live state
+- whether a mailbox is warming is `models.ResolveEffectiveWarmup` (`Email.EffectiveWarmup`, `warmupEnabledSQL`/`cloudWarmsSQL` in SQL, `warmup_effective` over the API). Warmbly Cloud warms enrolled mailboxes while `email_accounts.warmup` stays NULL, so the column alone says "off" for them; read it directly only in code that runs this instance's own warmup. `make warmup-check` pins those reads per file in `scripts/warmup-reads.baseline`
 - preserve separation between free and premium warmup pools
 - optimize for many-worker deployments, not a single giant worker
 - document any change that alters worker assignment, pool membership, or network boundaries

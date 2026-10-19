@@ -123,6 +123,10 @@ Everything else is safe to run freely.
   mailbox has the history to justify it.
 - Keep warmup running on mailboxes that campaign. Do not stop warmup because a
   campaign started.
+- Whether a mailbox is warming is `warmup_effective` (the WARMUP and WARMED BY
+  columns of `warmbly mailbox list`), never the bare `warmup` field: a mailbox
+  Warmbly Cloud warms has `warmup: null` while it warms. `unknown` means Warmbly
+  Cloud has not reported it yet, not off; do not "turn warmup on" for it.
 - To stop emailing ONE contact for a while, use `warmbly campaign pause-lead
   CAMPAIGN_ID CONTACT_ID --until 2026-09-21T17:00:00Z`, not an unsubscribe and
   not the suppression list: both of those are workspace-wide and permanent.

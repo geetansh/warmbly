@@ -413,7 +413,7 @@ func (r *adminRepository) GetUserPreview(ctx context.Context, userID uuid.UUID) 
 	// Get email accounts. user_id is uuid, not text.
 	emailQuery := `
 		SELECT id, email, user_id, organization_id, status, provider,
-			warmup IS NOT NULL as warmup_enabled, last_synced_at
+			` + warmupEnabledSQL("email_accounts") + ` as warmup_enabled, last_synced_at
 		FROM email_accounts
 		WHERE user_id = $1
 		ORDER BY created_at DESC
@@ -617,7 +617,7 @@ func (r *adminRepository) GetUserEmails(ctx context.Context, userID uuid.UUID, o
 
 	query := `
 		SELECT ea.id, ea.email, ea.user_id, ea.organization_id,
-			ea.status, ea.provider, ea.warmup IS NOT NULL, ea.last_synced_at
+			ea.status, ea.provider, ` + warmupEnabledSQL("ea") + `, ea.last_synced_at
 		FROM email_accounts ea
 		` + whereClause + `
 		ORDER BY ea.created_at DESC, ea.id DESC
@@ -860,7 +860,7 @@ func (r *adminRepository) GetWorkerEmails(ctx context.Context, workerID uuid.UUI
 	// reported), as the risk rebalancer reads it. risk_band is the resolved tier.
 	query := `
 		SELECT ea.id, ea.email, ea.user_id::uuid, ea.organization_id,
-			ea.status, ea.provider, ea.warmup IS NOT NULL, ea.last_synced_at,
+			ea.status, ea.provider, ` + warmupEnabledSQL("ea") + `, ea.last_synced_at,
 			COALESCE(ea.risk_band, 'clean'::email_risk_band)::text,
 			ea.risk_evaluated_at,
 			COALESCE(wh.health_state, '')::text,
@@ -1949,9 +1949,9 @@ func (r *adminRepository) SearchMailboxesForAdmin(ctx context.Context, search *m
 	}
 	switch search.Warmup {
 	case "on":
-		where += " AND ea.warmup IS NOT NULL"
+		where += " AND " + warmupEnabledSQL("ea")
 	case "off":
-		where += " AND ea.warmup IS NULL"
+		where += " AND NOT " + warmupEnabledSQL("ea")
 	}
 	if search.CreatedWithin > 0 {
 		where += " AND ea.created_at >= NOW() - ($" + itoa(argNum) + "::int * INTERVAL '1 day')"
@@ -2084,7 +2084,7 @@ func (r *adminRepository) SearchMailboxesForAdmin(ctx context.Context, search *m
 			ea.user_id, u.email,
 			ea.organization_id, o.name,
 			ea.worker_id,
-			(ea.warmup IS NOT NULL) AS warmup_enabled,
+			` + warmupEnabledSQL("ea") + ` AS warmup_enabled,
 			ea.risk_band::text, ea.warmup_pool_type,
 			ea.campaign_limit, ea.last_synced_at, ea.created_at
 		FROM email_accounts ea

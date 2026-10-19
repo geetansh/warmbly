@@ -275,7 +275,8 @@ warmbly campaign add-step CAMPAIGN_ID --subject "Quick question" --wait-after 0
 warmbly campaign preflight CAMPAIGN_ID
 warmbly campaign start CAMPAIGN_ID
 
-# Mailbox health across the workspace
+# Mailbox health across the workspace. WARMUP and WARMED BY say whether each
+# mailbox is warming and whether this instance or Warmbly Cloud warms it.
 warmbly mailbox list
 warmbly mailbox check MAILBOX_ID
 warmbly mailbox edit MAILBOX_ID --daily-limit 40

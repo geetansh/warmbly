@@ -618,6 +618,8 @@ func mailboxSpec() resource {
 		col("PROVIDER", "provider"),
 		col("STATUS", "status"),
 		col("DAILY", "campaign_limit"),
+		col("WARMUP", "warmup_effective.state"),
+		col("WARMED BY", "warmup_effective.source"),
 		colf("SYNCED", "last_synced_at", "time"),
 	}
 	return resource{

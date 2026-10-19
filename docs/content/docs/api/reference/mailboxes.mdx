@@ -64,6 +64,7 @@ A `data` array of mailbox objects plus a `pagination` envelope.
       "auth_failing_since": null,
       "warmup": "2026-05-20T00:00:00Z",
       "warmup_paused_at": null,
+      "warmup_effective": { "source": "local", "state": "active", "started_at": "2026-05-20T00:00:00Z" },
       "warmup_base": 10,
       "warmup_max": 40,
       "warmup_increase": 1,
@@ -87,7 +88,7 @@ A `data` array of mailbox objects plus a `pagination` envelope.
 }
 ```
 
-`provider` is one of `gmail`, `outlook`, or `smtp_imap`, and says how Warmbly talks to the mailbox. `mail_host` says who hosts it, whatever the transport: one of `google_workspace`, `gmail`, `microsoft365`, `outlook`, `zoho`, `yahoo`, `aol`, `icloud`, `fastmail`, `godaddy`, `namecheap`, `ionos`, `hostinger`, `ovh`, `migadu`, `purelymail`, `rackspace`, `yandex`, `gmx`, `proton`, or `other`. `auth_method` is how it signs in: `password`, `app_password`, `oauth`, or `delegated`. A Google Workspace mailbox on an app password is `provider` `smtp_imap`, `mail_host` `google_workspace`, `auth_method` `app_password`. Either may be an empty string until known; a mailbox whose host is not recorded yet is classified in the background from its domain's DNS. `avatar_url` is the mailbox's own profile photo, read when a Microsoft mailbox connects or reconnects, or through an administrator grant or from the inbox vendor it was imported from, which are re-checked weekly; it is an empty string when none can be read, which includes Google mailboxes signed in on their own and every SMTP mailbox. `status` is one of `active`, `inactive`, or `revoked`. `warmup` is the warmup anchor timestamp (null when warmup has never been enabled); a non-null `warmup_paused_at` means warmup is enabled but paused. `auth_state` is the sending domain's authentication state, one of `passing` (SPF and DMARC present), `failing` (SPF or DMARC missing), or `unknown` (not checked yet, the DNS lookup could not complete, or the domain is special-use and cannot resolve). It is refreshed by a background check. `auth_dkim` is positive-only and never gates: `true` means a DKIM key was found at a probed selector, `false` means none answered, which is unverified rather than missing because selectors are not discoverable from DNS. `auth_failing_since` is when the domain entered `failing` and is null otherwise; a domain that stays `failing` past the instance grace period stops cold sending and warmup from every mailbox on it, so this is the clock that decides. See [domain authentication](/guides/deliverability/#domain-authentication). `total` and `next_cursor` may be null when not applicable.
+`provider` is one of `gmail`, `outlook`, or `smtp_imap`, and says how Warmbly talks to the mailbox. `mail_host` says who hosts it, whatever the transport: one of `google_workspace`, `gmail`, `microsoft365`, `outlook`, `zoho`, `yahoo`, `aol`, `icloud`, `fastmail`, `godaddy`, `namecheap`, `ionos`, `hostinger`, `ovh`, `migadu`, `purelymail`, `rackspace`, `yandex`, `gmx`, `proton`, or `other`. `auth_method` is how it signs in: `password`, `app_password`, `oauth`, or `delegated`. A Google Workspace mailbox on an app password is `provider` `smtp_imap`, `mail_host` `google_workspace`, `auth_method` `app_password`. Either may be an empty string until known; a mailbox whose host is not recorded yet is classified in the background from its domain's DNS. `avatar_url` is the mailbox's own profile photo, read when a Microsoft mailbox connects or reconnects, or through an administrator grant or from the inbox vendor it was imported from, which are re-checked weekly; it is an empty string when none can be read, which includes Google mailboxes signed in on their own and every SMTP mailbox. `status` is one of `active`, `inactive`, or `revoked`. `warmup_effective` is whether the mailbox is warming, wherever the warming happens: `source` is `local` (this instance warms it) or `cloud` ([Warmbly Cloud](/guides/warmbly-cloud/) warms it), and `state` is `active`, `paused`, `off`, or `unknown` (Warmbly Cloud has not reported this mailbox yet, which is not the same as off). For a `cloud` mailbox, `started_at` and `observed_at` are what Warmbly Cloud last reported and when. Read this field to know whether a mailbox is warming. `warmup` and `warmup_paused_at` describe only this instance's own warmup: `warmup` is its anchor timestamp (null when it has never been enabled) and a non-null `warmup_paused_at` means it is enabled but paused. Both stay null for a mailbox Warmbly Cloud warms. `auth_state` is the sending domain's authentication state, one of `passing` (SPF and DMARC present), `failing` (SPF or DMARC missing), or `unknown` (not checked yet, the DNS lookup could not complete, or the domain is special-use and cannot resolve). It is refreshed by a background check. `auth_dkim` is positive-only and never gates: `true` means a DKIM key was found at a probed selector, `false` means none answered, which is unverified rather than missing because selectors are not discoverable from DNS. `auth_failing_since` is when the domain entered `failing` and is null otherwise; a domain that stays `failing` past the instance grace period stops cold sending and warmup from every mailbox on it, so this is the clock that decides. See [domain authentication](/guides/deliverability/#domain-authentication). `total` and `next_cursor` may be null when not applicable.
 
 ## Get a mailbox
 
@@ -116,6 +117,7 @@ A bare mailbox object, same shape as one element of the list `data` array.
   "min_wait_time": 600,
   "warmup": "2026-05-20T00:00:00Z",
   "warmup_paused_at": null,
+  "warmup_effective": { "source": "local", "state": "active", "started_at": "2026-05-20T00:00:00Z" },
   "warmup_pool_type": "premium",
   "tracking_domain": "t.acme.com",
   "tracking_domain_verified": true,
@@ -608,11 +610,12 @@ Auth: **Scope** `READ_EMAILS` · **Org permission** `view_campaigns`
   "blocked_at": "2026-06-09T14:00:00Z",
   "blocked_until": "2026-06-16T14:00:00Z",
   "can_appeal": true,
-  "pending_appeal": false
+  "pending_appeal": false,
+  "source": "local"
 }
 ```
 
-`reason`, `blocked_at`, and `blocked_until` are omitted when the mailbox is not blocked. `health_state` reflects the mailbox's rolling warmup health (for example `healthy`, `watch`, `throttled`, `quarantined`, or `blocked`).
+`reason`, `blocked_at`, and `blocked_until` are omitted when the mailbox is not blocked. `health_state` reflects the mailbox's rolling warmup health (for example `healthy`, `watch`, `throttled`, `quarantined`, or `blocked`). `source` is `local` for this instance's own pool and `cloud` for a mailbox Warmbly Cloud warms, whose standing is the one Warmbly Cloud last reported. A `cloud` mailbox Warmbly Cloud has not reported yet reads `blocked` with the reason `cloud_evidence_unavailable`, and `can_appeal` is always `false` for it, because its appeals are handled in Warmbly Cloud.
 
 ## Submit a warmup appeal
 

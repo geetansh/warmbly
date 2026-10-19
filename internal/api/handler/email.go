@@ -198,7 +198,7 @@ func (h *Handler) warmupLifecycle(c *gin.Context, action string) {
 	// Seed/repair the warmup chain immediately so warming starts now rather
 	// than on the next reconciler pass. Best-effort: the reconciler is the
 	// backstop, and pause has nothing to seed.
-	if action == "start" || action == "resume" {
+	if (action == "start" || action == "resume") && (resp == nil || !resp.CloudWarmup.Warms()) {
 		if accountID, perr := uuid.Parse(emailAccountID); perr == nil {
 			_ = h.TasksService.EnsureWarmupScheduled(c.Request.Context(), accountID)
 		}

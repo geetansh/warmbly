@@ -523,12 +523,22 @@ func (s *service) ListMailboxes(ctx context.Context, orgID uuid.UUID) ([]models.
 					byRemote[states[i].RemoteID] = &states[i]
 				}
 				reported := map[uuid.UUID]models.PoolLinkWarmupSettings{}
+				warmup := map[uuid.UUID]models.CloudWarmupObserved{}
 				for _, e := range group {
-					if state := byRemote[e.RemoteID]; state != nil && e.EnrollmentState != "pending_remove" && state.Settings.Reported() {
+					state := byRemote[e.RemoteID]
+					if e.EnrollmentState == "pending_remove" {
+						continue
+					}
+					if state == nil {
+						s.forgetWarmup(ctx, e.EmailAccountID)
+						continue
+					}
+					warmup[e.EmailAccountID] = state.CloudWarmupObserved()
+					if state.Settings.Reported() {
 						reported[e.EmailAccountID] = state.Settings
 					}
 				}
-				if _, err := s.mirror(ctx, listedAt, reported); err != nil {
+				if _, err := s.mirror(ctx, listedAt, reported, warmup); err != nil {
 					log.Warn().Err(err).Str("instance_id", instanceID.String()).Msg("cloud link: warmup settings could not be mirrored")
 				}
 				for _, e := range group {
@@ -844,6 +854,7 @@ func (s *service) SetLifecycle(ctx context.Context, orgID, accountID uuid.UUID, 
 		return nil, xerr
 	}
 	s.recordStanding(ctx, accountID, state.Health, true)
+	s.mirrorReported(ctx, accountID, &state)
 	return s.row(ctx, orgID, accountID)
 }
 
@@ -870,5 +881,6 @@ func (s *service) SetParticipation(ctx context.Context, orgID, accountID uuid.UU
 		return nil, xerr
 	}
 	s.recordStanding(ctx, accountID, state.Health, true)
+	s.mirrorReported(ctx, accountID, &state)
 	return s.row(ctx, orgID, accountID)
 }

@@ -1,3 +1,4 @@
+import type { WarmupSource, WarmupState } from "@/lib/api/models/app/emails/Inbox";
 // Per-mailbox status from GET /analytics/accounts/:id (backend
 // models.EmailAccountStatus). Rich shape: health band, today's usage,
 // warmup status, and any active errors.
@@ -30,6 +31,9 @@ export interface AccountDailyUsage {
 }
 
 export interface WarmupStatusInfo {
+    /** Who warms the mailbox and what it last reported; a Cloud mailbox reads Warmbly Cloud's answer. */
+    source?: WarmupSource;
+    state?: WarmupState;
     enabled: boolean;
     paused: boolean;
     paused_at?: Date | null;

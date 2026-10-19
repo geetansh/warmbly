@@ -561,7 +561,27 @@ func (s *service) GetBanStatus(ctx context.Context, orgID, accountID uuid.UUID) 
 
 	status := &models.WarmupBanStatus{
 		EmailAccountID: accountID,
+		Source:         models.WarmupSourceLocal,
 		HealthState:    string(models.WarmupHealthHealthy),
+	}
+
+	// A mailbox Warmbly Cloud warms is in no local pool; its standing is the one Cloud reported.
+	if s.emailRepo != nil {
+		if acc, _ := s.emailRepo.Get(ctx, orgID.String(), accountID.String()); acc != nil && acc.CloudWarmup.Warms() {
+			cloud, err := s.repo.GetCloudStanding(ctx, accountID)
+			if err != nil {
+				return nil, errx.InternalError()
+			}
+			if cloud == nil {
+				cloud = models.CloudStandingUnavailable()
+			}
+			status.Source = models.WarmupSourceCloud
+			status.HealthState = cloud.State
+			status.Reason = cloud.Reason
+			status.BlockedUntil = cloud.BlockedUntil
+			status.Blocked = cloud.State == string(models.WarmupHealthBlocked) || cloud.State == string(models.WarmupHealthQuarantined)
+			return status, nil
+		}
 	}
 
 	health, _ := s.getParticipantForAnyPool(ctx, accountID)

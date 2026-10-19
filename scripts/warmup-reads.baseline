@@ -1,0 +1,36 @@
+# Raw reads of email_accounts.warmup per file, checked by scripts/check-warmup-reads.sh.
+# Each one is about this instance's own warmup (running it, writing it, or the
+# resolver itself). Reporting whether a mailbox is warming goes through
+# models.ResolveEffectiveWarmup instead. Format: count path
+1 cmd/cli/status.go
+1 internal/api/handler/unibox_compose.go
+2 internal/app/aitools/tools_mailboxes.go
+5 internal/app/analytics/service.go
+2 internal/app/analytics/status_reads.go
+1 internal/app/cloudlink/warmup_settings.go
+1 internal/app/consumer/dead_worker.go
+1 internal/app/consumer/warmup_reply_back.go
+2 internal/app/email/cloud_warmup.go
+2 internal/app/email/handler.go
+1 internal/app/mailboximport/rows.go
+1 internal/app/mailboximport/runner.go
+1 internal/app/poollink/service.go
+4 internal/models/effective_warmup.go
+4 internal/models/email.go
+1 internal/repository/email_cloud_warmup.go
+1 internal/repository/pg_admin.go
+2 internal/repository/pg_advisor_snapshot.go
+9 internal/repository/pg_email.go
+3 internal/repository/pg_monitoring.go
+2 internal/repository/pg_monitoring_state.go
+1 internal/repository/pg_worker_placement.go
+1 internal/repository/warmup_dispatch.go
+1 internal/repository/warmup_lineage.go
+2 internal/repository/warmup_send_failure.go
+2 internal/scheduler/campaign_projection.go
+1 internal/scheduler/campaign_scheduler.go
+2 internal/scheduler/cold_ramp.go
+4 internal/scheduler/warmup_dispatch.go
+2 internal/scheduler/warmup_scheduler.go
+1 internal/tasks/email_task.go
+1 internal/tasks/warmup_lineage.go

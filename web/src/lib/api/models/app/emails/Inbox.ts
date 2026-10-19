@@ -1,3 +1,13 @@
+export type WarmupSource = "local" | "cloud";
+export type WarmupState = "active" | "paused" | "off" | "unknown";
+
+export interface EffectiveWarmup {
+    source: WarmupSource;
+    state: WarmupState;
+    started_at?: Date | null;
+    observed_at?: Date | null;
+}
+
 export default interface Inbox {
     id: string;
     email: string;
@@ -61,8 +71,11 @@ export default interface Inbox {
     auth_reason?: string;
     auth_checked_at?: Date | null;
     auth_failing_since?: Date | null;
+    /** This instance's own warmup only; null for a mailbox Warmbly Cloud warms. Read warmup_effective instead. */
     warmup?: Date | null;
     warmup_paused_at?: Date | null;
+    /** Whether the mailbox is warming and who warms it; the server's models.ResolveEffectiveWarmup. */
+    warmup_effective?: EffectiveWarmup;
     warmup_base: number;
     warmup_max: number;
     warmup_increase: number;

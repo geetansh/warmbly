@@ -646,7 +646,7 @@ func (r *analyticsRepository) GetEmailAccountCounts(ctx context.Context, orgID u
 		SELECT
 			COUNT(*) as total,
 			COUNT(CASE WHEN status = 'active' THEN 1 END) as active,
-			COUNT(CASE WHEN warmup IS NOT NULL THEN 1 END) as in_warmup,
+			COUNT(DISTINCT ea.id) FILTER (WHERE ` + warmupEnabledSQL("ea") + `) as in_warmup,
 			COUNT(DISTINCT eae.email_account_id) as with_errors
 		FROM email_accounts ea
 		LEFT JOIN email_account_errors eae ON eae.email_account_id = ea.id AND eae.resolved_at IS NULL

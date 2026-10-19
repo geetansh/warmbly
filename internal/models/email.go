@@ -115,17 +115,22 @@ type Email struct {
 	// cannot stop sending immediately.
 	AuthFailingSince *time.Time `json:"auth_failing_since,omitempty"`
 
-	Warmup          *time.Time `json:"warmup"`
-	WarmupPausedAt  *time.Time `json:"warmup_paused_at"`
-	WarmupBase      int        `json:"warmup_base"`
-	WarmupMax       int        `json:"warmup_max"`
-	WarmupIncrease  int        `json:"warmup_increase"`
-	WarmupReplyRate int        `json:"warmup_reply_rate"`
-	WarmupTag       string     `json:"warmup_tag"`
-	WarmupPoolType  string     `json:"warmup_pool_type"`
-	WarmupStartTime string     `json:"warmup_start_time"`
-	WarmupEndTime   string     `json:"warmup_end_time"`
-	WarmupDays      int        `json:"warmup_days"`
+	// Warmup and WarmupPausedAt are this instance's own warmup only; ask EffectiveWarmup whether the mailbox is warming.
+	Warmup         *time.Time `json:"warmup"`
+	WarmupPausedAt *time.Time `json:"warmup_paused_at"`
+	// CloudWarmup is the mailbox's Warmbly Cloud enrollment, read alongside the row; nil when not enrolled or not read.
+	CloudWarmup *CloudLinkWarmup `json:"-"`
+	// WarmupEffective is ResolveEffectiveWarmup, filled by the reads that join the Cloud enrollment.
+	WarmupEffective *EffectiveWarmup `json:"warmup_effective,omitempty"`
+	WarmupBase      int              `json:"warmup_base"`
+	WarmupMax       int              `json:"warmup_max"`
+	WarmupIncrease  int              `json:"warmup_increase"`
+	WarmupReplyRate int              `json:"warmup_reply_rate"`
+	WarmupTag       string           `json:"warmup_tag"`
+	WarmupPoolType  string           `json:"warmup_pool_type"`
+	WarmupStartTime string           `json:"warmup_start_time"`
+	WarmupEndTime   string           `json:"warmup_end_time"`
+	WarmupDays      int              `json:"warmup_days"`
 
 	// WarmupPlacement and WarmupFolder decide where warmup mail ends up in the
 	// customer's real mail client: see WarmupFiling. An empty WarmupFolder
@@ -157,11 +162,6 @@ type Email struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// IsWarmingActive reports whether the mailbox is actively warming up: warmup
-// has been enabled (anchor set) and is not currently paused. The scheduler,
-// task runner, and analytics all key off this rather than the raw Warmup
-// pointer so a paused mailbox is treated as "not sending normal warmup" while
-// still preserving its ramp progress.
 // ClockTimezone is the zone the mailbox's own hours (warmup window, sending
 // behaviour workday, business-hours band) are read in: its own timezone, else
 // the workspace's. Empty means UTC. Campaign windows are not read here; a
@@ -173,6 +173,12 @@ func (e *Email) ClockTimezone() string {
 	return e.OrgTimezone
 }
 
+// EffectiveWarmup answers whether the mailbox is warming, here or in Warmbly Cloud.
+func (e *Email) EffectiveWarmup() EffectiveWarmup {
+	return ResolveEffectiveWarmup(e, e.CloudWarmup)
+}
+
+// IsWarmingActive is this instance's own warmup only, which is what the local scheduler runs; it is false for a Cloud-warmed mailbox.
 func (e *Email) IsWarmingActive() bool {
 	return e.Warmup != nil && e.WarmupPausedAt == nil
 }

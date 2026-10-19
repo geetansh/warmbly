@@ -106,8 +106,14 @@ func detectWarmupMailNotArriving(s *repository.AdvisorSnapshot) []Finding {
 func detectWarmupOffWhileSending(s *repository.AdvisorSnapshot) []Finding {
 	out := []Finding{}
 	for _, m := range s.Mailboxes {
-		if !m.InActiveCampaign || m.WarmupActive || m.WarmupPaused {
+		// Unreported is not off: Warmbly Cloud may well be warming it.
+		if !m.InActiveCampaign || m.WarmupActive || m.WarmupPaused || m.WarmupUnknown {
 			continue
+		}
+		// Cloud refuses stop, so the undo of turning its warmup on is a pause.
+		undo := "stop"
+		if m.WarmupCloud {
+			undo = "pause"
 		}
 
 		// A brand-new mailbox sending cold with no warmup at all is the worst
@@ -142,7 +148,7 @@ func detectWarmupOffWhileSending(s *repository.AdvisorSnapshot) []Finding {
 				"Turn warmup on",
 				map[string]any{"email_account_id": m.ID.String(), "action": "start"},
 				change("Warmup", "off", fmt.Sprintf("on, starting at %d/day", m.WarmupBase)),
-			), map[string]any{"email_account_id": m.ID.String(), "action": "stop"}),
+			), map[string]any{"email_account_id": m.ID.String(), "action": undo}),
 		})
 	}
 	return out

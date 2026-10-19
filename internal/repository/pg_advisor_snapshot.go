@@ -81,8 +81,13 @@ func (r *advisorRepository) loadMailboxes(ctx context.Context, orgID uuid.UUID, 
 			ea.campaign_limit, ea.min_wait_time,
 			ea.tracking_domain, ea.tracking_domain_verified,
 			ea.auth_state, ea.auth_spf, ea.auth_dkim, ea.auth_dmarc, ea.auth_dmarc_policy, ea.auth_failing_since,
-			(ea.warmup IS NOT NULL AND ea.warmup_paused_at IS NULL) AS warmup_active,
-			(ea.warmup IS NOT NULL AND ea.warmup_paused_at IS NOT NULL) AS warmup_paused,
+			-- A Cloud-warmed mailbox reports what Warmbly Cloud last said, as models.ResolveEffectiveWarmup does.
+			CASE WHEN ` + cloudWarmsSQL + ` THEN clw.cloud_warmup_state IS NOT DISTINCT FROM 'active'
+			     ELSE ea.warmup IS NOT NULL AND ea.warmup_paused_at IS NULL END AS warmup_active,
+			CASE WHEN ` + cloudWarmsSQL + ` THEN clw.cloud_warmup_state IS NOT DISTINCT FROM 'paused'
+			     ELSE ea.warmup IS NOT NULL AND ea.warmup_paused_at IS NOT NULL END AS warmup_paused,
+			` + cloudWarmsSQL + ` AS warmup_cloud,
+			(` + cloudWarmsSQL + ` AND clw.cloud_warmup_state IS NULL) AS warmup_unknown,
 			ea.warmup_base, ea.warmup_max, ea.warmup_increase, ea.warmup_reply_rate,
 			COALESCE(ea.warmup_pool_type, 'free'),
 			ea.risk_band::text,
@@ -97,6 +102,7 @@ func (r *advisorRepository) loadMailboxes(ctx context.Context, orgID uuid.UUID, 
 			ea.send_lifecycle,
 			inb.delivered, inb.arrived, inb.lost_by
 		FROM email_accounts ea
+		` + cloudLinkWarmupJoin + `
 		LEFT JOIN LATERAL (
 			SELECT
 				COUNT(*) FILTER (WHERE t.completed_at > NOW() - INTERVAL '7 days')  AS d7,
@@ -177,7 +183,7 @@ func (r *advisorRepository) loadMailboxes(ctx context.Context, orgID uuid.UUID, 
 			&m.CampaignLimit, &m.MinWaitTime,
 			&m.TrackingDomain, &m.TrackingDomainVerified,
 			&m.AuthState, &m.AuthSPF, &m.AuthDKIM, &m.AuthDMARC, &m.AuthDMARCPolicy, &m.AuthFailingSince,
-			&m.WarmupActive, &m.WarmupPaused,
+			&m.WarmupActive, &m.WarmupPaused, &m.WarmupCloud, &m.WarmupUnknown,
 			&m.WarmupBase, &m.WarmupMax, &m.WarmupIncrease, &m.WarmupReplyRate, &m.WarmupPoolType,
 			&m.RiskBand,
 			&m.ColdSent7d, &m.ColdSent1d, &m.ColdSent30d,

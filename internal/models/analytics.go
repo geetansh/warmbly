@@ -304,13 +304,16 @@ type AccountDailyUsage struct {
 }
 
 type WarmupStatusInfo struct {
-	Enabled       bool       `json:"enabled"`
-	Paused        bool       `json:"paused"`
-	PausedAt      *time.Time `json:"paused_at,omitempty"`
-	StartedAt     time.Time  `json:"started_at"`
-	CurrentVolume int        `json:"current_volume"`
-	TargetVolume  int        `json:"target_volume"`
-	MaxVolume     int        `json:"max_volume"`
+	// Source and State are EffectiveWarmup's; a Cloud mailbox reports what Warmbly Cloud last said.
+	Source        WarmupSource `json:"source"`
+	State         WarmupState  `json:"state"`
+	Enabled       bool         `json:"enabled"`
+	Paused        bool         `json:"paused"`
+	PausedAt      *time.Time   `json:"paused_at,omitempty"`
+	StartedAt     time.Time    `json:"started_at"`
+	CurrentVolume int          `json:"current_volume"`
+	TargetVolume  int          `json:"target_volume"`
+	MaxVolume     int          `json:"max_volume"`
 	// ReplyRate is the configured share of warmup sends that receive synthetic replies.
 	ReplyRate  int `json:"reply_rate"`
 	DaysActive int `json:"days_active"`

@@ -43,8 +43,11 @@ type AdvisorMailbox struct {
 	// whether sending has already stopped or is only about to.
 	AuthFailingSince *time.Time
 
-	WarmupActive    bool
-	WarmupPaused    bool
+	WarmupActive bool
+	WarmupPaused bool
+	// WarmupCloud is a mailbox Warmbly Cloud warms; WarmupUnknown is one whose warmup Cloud has not reported yet.
+	WarmupCloud     bool
+	WarmupUnknown   bool
 	WarmupBase      int
 	WarmupMax       int
 	WarmupIncrease  int

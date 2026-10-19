@@ -111,11 +111,16 @@ func printMailboxes(io *iostreams.IOStreams, raw json.RawMessage) {
 	}
 	var list struct {
 		Data []struct {
-			Email         string  `json:"email"`
-			Status        string  `json:"status"`
-			AuthState     string  `json:"auth_state"`
-			CampaignLimit int     `json:"campaign_limit"`
-			Warmup        *string `json:"warmup"`
+			Email          string  `json:"email"`
+			Status         string  `json:"status"`
+			AuthState      string  `json:"auth_state"`
+			CampaignLimit  int     `json:"campaign_limit"`
+			Warmup         *string `json:"warmup"`
+			WarmupPausedAt *string `json:"warmup_paused_at"`
+			// WarmupEffective covers warmup run here and in Warmbly Cloud; the bare warmup field is local only.
+			WarmupEffective *struct {
+				State string `json:"state"`
+			} `json:"warmup_effective"`
 		} `json:"data"`
 	}
 	if json.Unmarshal(raw, &list) != nil {
@@ -126,7 +131,8 @@ func printMailboxes(io *iostreams.IOStreams, raw json.RawMessage) {
 	var trouble []string
 	for _, m := range list.Data {
 		capacity += m.CampaignLimit
-		if m.Warmup != nil {
+		// A host older than warmup_effective only knows its own warmup.
+		if m.WarmupEffective != nil && m.WarmupEffective.State == string(models.WarmupStateActive) || m.WarmupEffective == nil && m.Warmup != nil && m.WarmupPausedAt == nil {
 			warming++
 		}
 		// "unknown" means never checked and never gates sending, so it is not

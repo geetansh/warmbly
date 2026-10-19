@@ -1188,9 +1188,11 @@ func (r *emailRepository) Search(ctx context.Context, orgID, search string, curs
 		 ea.created_at, ea.updated_at,
 		 COALESCE(
 			array_agg(eat.tag_id) FILTER (WHERE eat.tag_id IS NOT NULL), '{}'
-		 ) AS tags
+		 ) AS tags,
+		 ` + cloudLinkWarmupColumns + `
 		FROM email_accounts ea
 		LEFT JOIN email_tags eat ON eat.email_id = ea.id
+		` + cloudLinkWarmupJoin + `
 		WHERE ea.organization_id = $1
 		 AND ($2::uuid IS NULL OR (ea.created_at, ea.id) < (
 		  SELECT created_at, id
@@ -1204,7 +1206,7 @@ func (r *emailRepository) Search(ctx context.Context, orgID, search string, curs
 		  SELECT 1 FROM email_tags cf WHERE cf.email_id = ea.id AND cf.tag_id = $4
 		 ))
 		 AND ($6::uuid[] IS NULL OR ea.id = ANY($6::uuid[]))
-		GROUP BY ea.id
+		GROUP BY ea.id, clw.email_account_id
 		ORDER BY ea.created_at DESC, ea.id DESC
 		LIMIT $5
 	`
@@ -1232,6 +1234,7 @@ func (r *emailRepository) Search(ctx context.Context, orgID, search string, curs
 	inboxes := make([]models.Email, 0)
 	for rows.Next() {
 		var i models.Email
+		var cw cloudLinkWarmupScan
 		err := rows.Scan(
 			&i.ID, &i.Email, &i.Name, &i.SignaturePlain, &i.SignatureHTML, &i.SignatureSync, &i.SignatureCode, &i.SendAsEmail, &i.Provider, &i.MailHost, &i.AuthMethod, &i.DomainGrantID, &i.VendorConnectionID, &i.Vendor, &i.AvatarURL, &i.Status,
 			&i.LastSyncedAt, &i.LastID, &i.CampaignLimit, &i.MinWaitTime, &i.ReplyTo, &i.TrackingDomain, &i.TrackingDomainVerified, &i.TrackingDomainVerifiedAt, &i.TrackDirectMail,
@@ -1239,11 +1242,13 @@ func (r *emailRepository) Search(ctx context.Context, orgID, search string, curs
 			&i.Warmup, &i.WarmupPausedAt, &i.WarmupBase, &i.WarmupMax, &i.WarmupIncrease, &i.WarmupReplyRate, &i.WarmupTag, &i.WarmupPoolType,
 			&i.WarmupStartTime, &i.WarmupEndTime, &i.WarmupDays, &i.TestMode, &i.TestSendEnabled, &i.TestReceiveEnabled, &i.SharedDailyLimit, &i.RollingRecipientLimit, &i.WarmupPlacement, &i.WarmupFolder, &i.WarmupRetentionDays, &i.Timezone, &i.OrgTimezone, &i.SaveToSent, &i.RelayFolderMoves,
 			&i.CreatedAt, &i.UpdatedAt, &i.Tags,
+			&cw.enrollment, &cw.state, &cw.startedAt, &cw.volume, &cw.target, &cw.observedAt,
 		)
 		if err != nil {
 			db.CaptureError(err, "", nil, "scan")
 			return nil, errx.InternalError()
 		}
+		cw.apply(&i)
 		inboxes = append(inboxes, i)
 	}
 	if err := rows.Err(); err != nil {
@@ -1315,11 +1320,13 @@ func (r *emailRepository) Get(ctx context.Context, orgID, emailAccountID string)
 		 ea.warmup, ea.warmup_paused_at, ea.warmup_base,
 		 ea.warmup_max, ea.warmup_increase, ea.warmup_reply_rate, ea.warmup_tag, COALESCE(ea.warmup_pool_type, 'free') AS warmup_pool_type, ea.warmup_start_time, ea.warmup_end_time, ea.warmup_days, ea.test_mode, ea.test_send_enabled, ea.test_receive_enabled, ea.shared_daily_limit, ea.rolling_recipient_limit, ea.warmup_placement, ea.warmup_folder, COALESCE(ea.warmup_retention_days, 0) AS warmup_retention_days, ea.timezone, COALESCE((SELECT o.timezone FROM organizations o WHERE o.id = ea.organization_id), '') AS org_timezone, ea.save_to_sent, ea.relay_folder_moves,
 		 ea.created_at, ea.updated_at,
-		 COALESCE(array_agg(eat.tag_id) FILTER (WHERE eat.tag_id IS NOT NULL), '{}') AS tags
+		 COALESCE(array_agg(eat.tag_id) FILTER (WHERE eat.tag_id IS NOT NULL), '{}') AS tags,
+		 ` + cloudLinkWarmupColumns + `
 		FROM email_accounts ea
 		LEFT JOIN email_tags eat ON eat.email_id = ea.id
+		` + cloudLinkWarmupJoin + `
 		WHERE ea.organization_id = $1 AND ea.id = $2
-		GROUP BY ea.id
+		GROUP BY ea.id, clw.email_account_id
 	`
 
 	params := []any{
@@ -1328,6 +1335,7 @@ func (r *emailRepository) Get(ctx context.Context, orgID, emailAccountID string)
 	}
 
 	var i models.Email
+	var cw cloudLinkWarmupScan
 	err := r.DB.QueryRow(
 		ctx,
 		query,
@@ -1339,6 +1347,7 @@ func (r *emailRepository) Get(ctx context.Context, orgID, emailAccountID string)
 		&i.Warmup, &i.WarmupPausedAt, &i.WarmupBase, &i.WarmupMax, &i.WarmupIncrease, &i.WarmupReplyRate, &i.WarmupTag, &i.WarmupPoolType,
 		&i.WarmupStartTime, &i.WarmupEndTime, &i.WarmupDays, &i.TestMode, &i.TestSendEnabled, &i.TestReceiveEnabled, &i.SharedDailyLimit, &i.RollingRecipientLimit, &i.WarmupPlacement, &i.WarmupFolder, &i.WarmupRetentionDays, &i.Timezone, &i.OrgTimezone, &i.SaveToSent, &i.RelayFolderMoves,
 		&i.CreatedAt, &i.UpdatedAt, &i.Tags,
+		&cw.enrollment, &cw.state, &cw.startedAt, &cw.volume, &cw.target, &cw.observedAt,
 	)
 	if err != nil {
 		// A mailbox that does not exist, or belongs to another organization, is
@@ -1351,6 +1360,7 @@ func (r *emailRepository) Get(ctx context.Context, orgID, emailAccountID string)
 		db.CaptureError(err, query, params, "queryrow")
 		return nil, errx.InternalError()
 	}
+	cw.apply(&i)
 
 	return &i, nil
 }
