@@ -8,7 +8,7 @@ export type MailboxTab = z.infer<typeof mailboxTab>;
 export const domainTab = z.enum(["overview", "tracking", "redirect"]);
 export const domainFilter = z.enum(["all", "attention", "vendor"]);
 export const mailboxSort = z.strictObject({
-    by: z.enum(["mailbox", "status", "sent", "warmup", "inbox", "health"]),
+    by: z.enum(["mailbox", "status", "sent", "warmup", "inbox", "spam", "health"]),
     reverse: z.boolean(),
 }).nullable();
 export const analyticsCampaignFilter = z.strictObject({

@@ -58,6 +58,32 @@ export function PlacementRateBadge({ rate, className }: { rate?: PlacementRate |
     );
 }
 
+// The mailbox list's spam cell: raw spam over classified receipts at the major
+// providers, shown from the first receipt so spam is visible before a rate is.
+export function SpamCountBadge({ rate, className }: { rate?: PlacementRate | null; className?: string }) {
+    if (!rate || rate.delivered === 0) {
+        return (
+            <span className={cn("font-mono text-[11px] text-slate-300", className)} title={rate ? rateSentence(rate) : "No warmup deliveries in the last 7 days"}>
+                —
+            </span>
+        );
+    }
+    const title =
+        `${fmtNum(rate.spam)} of ${fmtNum(rate.delivered)} warmup emails at Google, Microsoft and Yahoo landed in spam over the last ${rate.window_days} days.` +
+        (rate.inbox_rate == null ? ` An inbox rate is shown after ${rate.min_sample}.` : "") +
+        " Other mail hosts are not counted.";
+    return (
+        <span
+            className={cn("inline-flex items-center gap-1.5 font-mono text-[11.5px] tabular-nums", rate.spam > 0 ? "text-rose-600 font-medium" : "text-slate-400", className)}
+            title={title}
+        >
+            <span className={cn("size-1.5 rounded-full", rate.spam > 0 ? "bg-rose-500" : "bg-emerald-400")} />
+            {fmtNum(rate.spam)}
+            <span className="opacity-60 font-normal">/{fmtNum(rate.delivered)}</span>
+        </span>
+    );
+}
+
 export function BandChip({ band, className }: { band: PlacementRate["band"]; className?: string }) {
     const style = BAND[band];
     return (
