@@ -10,6 +10,7 @@ package jobrun
 
 import (
 	"context"
+	"errors"
 	"hash/fnv"
 	"sync"
 	"time"
@@ -180,7 +181,8 @@ func Run(ctx context.Context, name string, fn func(ctx context.Context) error) {
 		}
 	}
 	runErr := safeRun(ctx, name, fn)
-	if runErr != nil {
+	var quiet quietError
+	if runErr != nil && !errors.As(runErr, &quiet) {
 		errs.CaptureException(runErr)
 		log.Warn().Err(runErr).Str("job", name).Msg("scheduled job failed")
 	}
@@ -190,6 +192,18 @@ func Run(ctx context.Context, name string, fn func(ctx context.Context) error) {
 		}
 	}
 }
+
+// Quiet marks a standing condition a job already reported: the panel records it, but it is not logged or captured again.
+func Quiet(err error) error {
+	if err == nil {
+		return nil
+	}
+	return quietError{err}
+}
+
+type quietError struct{ error }
+
+func (q quietError) Unwrap() error { return q.error }
 
 // safeRun turns a panic in a job into an error so one bad pass cannot take
 // the service down.

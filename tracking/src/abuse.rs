@@ -98,11 +98,83 @@ const SCANNER_UA_MARKERS: &[&str] = &[
     "zscaler",
 ];
 
+/// Phone makers whose device name, sent in a WebView or older browser UA,
+/// contains a marker above. Removed before matching so a person's open counts.
+const DEVICE_UA_NAMES: &[&str] = &["cubot"];
+
 pub fn is_scanner(user_agent: Option<&str>) -> bool {
     let Some(ua) = user_agent else {
         // No UA at all is never a real mail client or browser.
         return true;
     };
-    let ua = ua.to_ascii_lowercase();
+    let ua = DEVICE_UA_NAMES
+        .iter()
+        .fold(ua.to_ascii_lowercase(), |ua, name| ua.replace(name, " "));
     SCANNER_UA_MARKERS.iter().any(|marker| ua.contains(marker))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{is_prefetch, is_scanner};
+    use axum::http::{HeaderMap, HeaderValue};
+
+    #[test]
+    fn announced_fetchers_are_scanners() {
+        for ua in [
+            "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
+            "Mozilla/5.0 (compatible; bingbot/2.0; +http://www.bing.com/bingbot.htm)",
+            "Slackbot-LinkExpanding 1.0 (+https://api.slack.com/robots)",
+            "Twitterbot/1.0",
+            "TelegramBot (like TwitterBot)",
+            "curl/8.4.0",
+            "python-requests/2.31.0",
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/120.0.0.0 Safari/537.36",
+        ] {
+            assert!(is_scanner(Some(ua)), "{ua}");
+        }
+        assert!(is_scanner(None));
+    }
+
+    #[test]
+    fn people_and_the_gmail_proxy_are_not_scanners() {
+        for ua in [
+            "Mozilla/5.0 (Windows NT 5.1; rv:11.0) Gecko Firefox/11.0 (via ggpht.com GoogleImageProxy)",
+            "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1",
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Linux; Android 11; CUBOT_X50 Build/RP1A.200720.011; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/119.0.6045.163 Mobile Safari/537.36",
+            "Mozilla/5.0 (Linux; Android 10; CUBOT KINGKONG 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.104 Mobile Safari/537.36",
+        ] {
+            assert!(!is_scanner(Some(ua)), "{ua}");
+        }
+    }
+
+    #[test]
+    fn removing_a_phone_name_neither_hides_nor_makes_a_marker() {
+        assert!(is_scanner(Some(
+            "Mozilla/5.0 (Linux; Android 11; CUBOT_X50) compatible; Googlebot/2.1"
+        )));
+        assert!(is_scanner(Some("cubotbot/1.0")));
+        // The name is replaced by a separator, so its neighbours never join into a marker.
+        assert!(!is_scanner(Some(
+            "Mozilla/5.0 (Linux; Android 11; bcubotot)"
+        )));
+    }
+
+    #[test]
+    fn prefetch_headers_are_prefetches() {
+        for (name, value) in [
+            ("sec-purpose", "prefetch;prerender"),
+            ("purpose", "prefetch"),
+            ("x-purpose", "preview"),
+            ("x-moz", "prefetch"),
+        ] {
+            let mut headers = HeaderMap::new();
+            headers.insert(name, HeaderValue::from_static(value));
+            assert!(is_prefetch(&headers), "{name}: {value}");
+        }
+        let mut headers = HeaderMap::new();
+        headers.insert("sec-purpose", HeaderValue::from_static("navigate"));
+        assert!(!is_prefetch(&headers));
+        assert!(!is_prefetch(&HeaderMap::new()));
+    }
 }

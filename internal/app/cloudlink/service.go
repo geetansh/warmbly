@@ -499,6 +499,7 @@ func (s *service) ListMailboxes(ctx context.Context, orgID uuid.UUID) ([]models.
 	}
 	enrolled, err := s.repo.ListForOrg(ctx, orgID, nil)
 	if err != nil {
+		log.Error().Err(err).Str("organization_id", orgID.String()).Msg("cloud link: enrolled mailboxes could not be listed")
 		return nil, errx.InternalError()
 	}
 	byAccount := make(map[uuid.UUID]models.CloudLinkMailbox, len(enrolled))
@@ -550,6 +551,7 @@ func (s *service) ListMailboxes(ctx context.Context, orgID uuid.UUID) ([]models.
 					cloudByAccount[e.EmailAccountID] = state
 					if state == nil || state.Health == nil || !knownHealthState(state.Health.State) {
 						if err := s.repo.InvalidateStanding(ctx, e.EmailAccountID); err != nil {
+							log.Error().Err(err).Str("account_id", e.EmailAccountID.String()).Msg("cloud link: stale standing could not be invalidated")
 							return nil, errx.InternalError()
 						}
 						e.StandingObservedAt = nil
@@ -575,6 +577,26 @@ func (s *service) ListMailboxes(ctx context.Context, orgID uuid.UUID) ([]models.
 		}
 	}
 
+	// Settings shows what the mailbox drawer shows, so a ledger hold is never called unavailable.
+	var statuses map[uuid.UUID]*models.WarmupHealthInfo
+	if reader, ok := s.repo.(repository.CloudStatusReader); ok {
+		listed := make([]models.CloudLinkMailbox, 0, len(byAccount))
+		for _, e := range byAccount {
+			listed = append(listed, e)
+		}
+		var err error
+		if statuses, err = reader.CloudStatuses(ctx, listed); err != nil {
+			log.Error().Err(err).Str("organization_id", orgID.String()).Msg("cloud link: mailbox statuses could not be read")
+			return nil, errx.InternalError()
+		}
+	}
+	healthFor := func(e models.CloudLinkMailbox) *models.WarmupHealthInfo {
+		if statuses != nil {
+			return statuses[e.EmailAccountID]
+		}
+		return e.EffectiveStanding(time.Now())
+	}
+
 	rows := make([]models.CloudLinkMailboxRow, 0, len(accounts))
 	seen := make(map[uuid.UUID]bool, len(accounts))
 	add := func(a *models.Email) {
@@ -595,7 +617,7 @@ func (s *service) ListMailboxes(ctx context.Context, orgID uuid.UUID) ([]models.
 			row.Cloud = cloudByAccount[a.ID]
 			// The recorded standing covers a mailbox the cloud holds out of its pool.
 			if row.Cloud != nil {
-				row.Cloud.Health = e.EffectiveStanding(time.Now())
+				row.Cloud.Health = healthFor(e)
 			}
 		}
 		rows = append(rows, row)

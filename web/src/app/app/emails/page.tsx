@@ -1484,7 +1484,7 @@ function MailboxStatusPill({ box, status, historicalIssue, warming, cloudGap, co
     if (!status) return <span className="text-[10.5px] text-slate-500">{pending ? "Checking…" : "Unavailable"}</span>;
 
     // One word; the icons beside it say which activities are on.
-    const label = mailboxActivityLabel(status, warming);
+    const label = sending && warming ? "Active" : sending ? "Sending" : resting ? (lifecycle?.state === "reserve" ? "Reserve" : "Resting") : warming ? "Warming" : "Idle";
     const title = [
         sending ? "Sending campaign emails" : resting ? `Held out of campaign sending${lifecycle?.reason ? `: ${lifecycle.reason}` : ""}` : "Not in a live campaign",
         warming
@@ -1495,7 +1495,7 @@ function MailboxStatusPill({ box, status, historicalIssue, warming, cloudGap, co
                 ? "warmup paused"
                 : "warmup off",
     ].join(", ");
-    const text = sending ? "text-sky-700" : label === "Warming" ? "text-orange-600" : resting ? "text-violet-600" : "text-slate-400";
+    const text = sending ? "text-sky-700" : resting ? "text-violet-600" : warming ? "text-orange-600" : "text-slate-400";
     return (
         <span className={`inline-flex items-center gap-1.5 max-w-full text-[10.5px] font-medium uppercase tracking-[0.08em] ${text}`} title={title}>
             <span className="inline-flex items-center gap-0.5 shrink-0">

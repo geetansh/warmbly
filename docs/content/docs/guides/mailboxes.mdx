@@ -562,7 +562,7 @@ The row shows **Resting** or **Reserve** even when no campaign is active on that
 
 A mailbox rests when it is quarantined or blocked from warmup, and returns on its own three days after that lifts. One good hour does not put it back in rotation. Spam placement never rests a mailbox: a `watch` or `throttled` mailbox stays in rotation with its daily cold volume dampened (to 70% and 50%) until placement recovers.
 
-A missing or stale [Warmbly Cloud](/guides/warmbly-cloud/#safety-and-enforcement) status is not a health signal either way. It never rests a mailbox, and it neither restarts nor ends a rest already running; campaign sends from the mailbox wait until a current status arrives.
+A missing or stale [Warmbly Cloud](/guides/warmbly-cloud/#safety-and-enforcement) status is not a health signal. It never rests a mailbox, and campaign sends from the mailbox wait until a current status arrives. A rest that is already running stays in place, and its three days count only time with a current status, so a hold that ends while the status is missing does not put the mailbox back on the first fresh report.
 
 Resting only makes sense while the mailbox is in a warmup pool, because pool health is the signal it recovers on. If a resting mailbox leaves its pool (the workspace loses warmup when a trial ends or a plan changes), there is no health signal to wait for, so the mailbox returns on its own three days after its last rest stamp rather than staying out indefinitely. Pausing warmup on the mailbox does not remove it from the pool, so its health keeps being tracked and the normal three days after it lifts still apply.
 

@@ -34,29 +34,6 @@ describe("cold rotation activity", () => {
     });
 });
 
-describe("mailbox list label", () => {
-    const idle: Activity = { in_campaign: false };
-    const sending: Activity = { in_campaign: true };
-    const resting: Activity = { in_campaign: true, send_lifecycle: { state: "resting" } };
-    const reserve: Activity = { in_campaign: true, send_lifecycle: { state: "reserve" } };
-
-    it("ranks Active > Sending > Reserve > Warming > Resting > Idle", () => {
-        expect(mailboxActivityLabel(sending, true)).toBe("Active");
-        expect(mailboxActivityLabel(sending, false)).toBe("Sending");
-        expect(mailboxActivityLabel(reserve, true)).toBe("Reserve");
-        expect(mailboxActivityLabel(reserve, false)).toBe("Reserve");
-        expect(mailboxActivityLabel(resting, true)).toBe("Warming");
-        expect(mailboxActivityLabel(idle, true)).toBe("Warming");
-        expect(mailboxActivityLabel(resting, false)).toBe("Resting");
-        expect(mailboxActivityLabel(idle, false)).toBe("Idle");
-    });
-
-    it("reads a missing status as idle unless warmup runs", () => {
-        expect(mailboxActivityLabel(undefined, false)).toBe("Idle");
-        expect(mailboxActivityLabel(undefined, true)).toBe("Warming");
-    });
-});
-
 describe("Cloud standing availability", () => {
     it("tells a missing Cloud report from a real block", () => {
         expect(cloudStandingUnavailable({ reason: "cloud_evidence_unavailable" })).toBe(true);

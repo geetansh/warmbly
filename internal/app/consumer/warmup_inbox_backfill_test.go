@@ -151,7 +151,7 @@ func TestCleanupKeepsTheRowWhenPublishingFails(t *testing.T) {
 	if err == nil {
 		t.Fatal("a failed publish was reported as success")
 	}
-	if resume, held := sweep.held[e.Message.EmailID]; !held || resume != uuid.Nil {
+	if h, held := sweep.held[e.Message.EmailID]; !held || h.resume != uuid.Nil {
 		t.Fatalf("the mailbox was not held for a retry of the leak it did not file: %v", sweep.held)
 	}
 	if len(inbox.deleted) != 0 {

@@ -2,8 +2,7 @@ package models
 
 import "time"
 
-// WarmupReasonCloudEvidenceUnavailable marks a standing that only says Warmbly
-// Cloud has no current report: it holds sends, but it is not a verdict.
+// WarmupReasonCloudEvidenceUnavailable marks a missing Cloud report: it holds sends but is no verdict.
 const WarmupReasonCloudEvidenceUnavailable = "cloud_evidence_unavailable"
 
 // CloudStandingUnavailable is the standing shown while Warmbly Cloud has no current report.

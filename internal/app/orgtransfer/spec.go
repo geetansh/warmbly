@@ -1109,6 +1109,8 @@ var ExcludedTables = map[string]string{
 	"slack_inbox_threads":              "Which Slack thread mirrors which inbox conversation. The Slack install and its channel do not travel; the conversations themselves do, with the unified inbox.",
 	"user_view_preferences":            "Each member's own column layout and sort for the dashboard's lists, and their unibox scope rail arrangement. It belongs to the person rather than the workspace: members are matched by account on import and a layout names custom fields the destination may not hold yet, so everyone starts from the default view and picks their columns again.",
 	"campaign_send_plan_snapshots":     "Today's precomputed send plan for a campaign, derived from the campaign, its leads, its mailboxes and this instance's limits, which all travel. Keyed to this instance's budget day, and naming mailboxes and workers. The destination's own background snapshotter recomputes it.",
+	"org_export_jobs":                  "The exports this instance ran for the workspace, each naming an archive in this instance's object storage that expires after 7 days. The archive is the export; the destination keeps its own list.",
+	"org_import_jobs":                  "The imports this instance ran into the workspace, with their progress and the uploaded archive's storage key here. An import is work the instance doing it records for itself.",
 }
 
 // TableByName indexes Tables for lookup during import.

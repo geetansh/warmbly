@@ -2,6 +2,7 @@ package jobs
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/google/uuid"
@@ -45,29 +46,32 @@ type riskMarkWarmupRepo struct {
 	repository.WarmupRepository
 	state   models.WarmupHealthState
 	unknown bool
+	err     error
 }
 
 func (r riskMarkWarmupRepo) GetKnownHealthState(context.Context, uuid.UUID) (models.WarmupHealthState, bool, error) {
-	return r.state, r.unknown, nil
+	return r.state, r.unknown, r.err
 }
 
-// A local event re-reads the standing; a missing Cloud report there must not reset the band.
+// A local event re-reads the standing; a missing Cloud report or a failed read must not reset the band.
 func TestRiskMarkKeepsTheBandOnUnknownCloudEvidence(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
 		state   models.WarmupHealthState
 		unknown bool
+		err     error
 		want    models.EmailRiskBand
 		writes  bool
 	}{
-		{"unknown", models.WarmupHealthHealthy, true, "", false},
-		{"unknown beside a real hold", models.WarmupHealthQuarantined, true, models.EmailRiskBandQuarantine, true},
-		{"known", models.WarmupHealthWatch, false, models.EmailRiskBandRisky, true},
+		{"unknown", models.WarmupHealthHealthy, true, nil, "", false},
+		{"unknown beside a real hold", models.WarmupHealthQuarantined, true, nil, models.EmailRiskBandQuarantine, true},
+		{"known", models.WarmupHealthWatch, false, nil, models.EmailRiskBandRisky, true},
+		{"read error", models.WarmupHealthHealthy, false, errors.New("database unavailable"), "", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			id := uuid.New()
 			repo := &riskRebalanceRepo{bands: map[uuid.UUID]models.EmailRiskBand{}}
-			s := &JobsService{WorkerRepo: repo, WarmupRepo: riskMarkWarmupRepo{state: tc.state, unknown: tc.unknown}}
+			s := &JobsService{WorkerRepo: repo, WarmupRepo: riskMarkWarmupRepo{state: tc.state, unknown: tc.unknown, err: tc.err}}
 			s.markRiskBandFromWarmupHealth(context.Background(), id, nil)
 			band, wrote := repo.bands[id]
 			if wrote != tc.writes || band != tc.want {

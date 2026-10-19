@@ -38,6 +38,8 @@ type mailboxGate struct {
 	// reopensAt is when a paced mailbox is expected back; zero when unknown,
 	// which the caller reads as "tomorrow".
 	reopensAt time.Time
+	// cloudStatus marks a health hold that is only a missing Warmbly Cloud report.
+	cloudStatus bool
 }
 
 func (g mailboxGate) open() bool { return g.reason == "" }
@@ -97,6 +99,9 @@ type healthRead struct {
 	state        models.WarmupHealthState
 	blockedUntil *time.Time
 	known        bool
+	cloudStatus  bool
+	// cloudMissing holds a quarantine or block open-ended: a missing Cloud report has no end.
+	cloudMissing bool
 }
 
 // newCampaignPass resolves the pool-wide state for one scheduling pass.
@@ -244,8 +249,10 @@ func (s *schedulerService) healthFor(ctx context.Context, p *campaignPass, id uu
 	}
 	h := healthRead{}
 	if s.warmupRepo != nil {
-		if state, until, err := s.warmupRepo.GetHealthState(ctx, id); err == nil {
-			h = healthRead{state: state, blockedUntil: until, known: true}
+		if states, err := s.warmupRepo.GetHealthStates(ctx, []uuid.UUID{id}); err == nil {
+			if state, ok := states[id]; ok {
+				h = healthRead{state: state.State, blockedUntil: state.BlockedUntil, known: true, cloudStatus: state.CloudStatusOnly, cloudMissing: state.CloudReportMissing}
+			}
 		}
 	}
 	p.health[id] = h
@@ -285,8 +292,8 @@ func (s *schedulerService) gateFor(ctx context.Context, p *campaignPass, acct mo
 	if h := s.healthFor(ctx, p, acct.ID); h.known {
 		switch h.state {
 		case models.WarmupHealthQuarantined, models.WarmupHealthBlocked:
-			if h.blockedUntil == nil || h.blockedUntil.After(time.Now()) {
-				return mailboxGate{reason: gateHealth}, 0
+			if h.cloudMissing || h.blockedUntil == nil || h.blockedUntil.After(time.Now()) {
+				return mailboxGate{reason: gateHealth, cloudStatus: h.cloudStatus}, 0
 			}
 		case models.WarmupHealthWatch, models.WarmupHealthThrottled:
 			remaining = int(float64(remaining) * adjustmentFor(h.state).volumeMultiplier)

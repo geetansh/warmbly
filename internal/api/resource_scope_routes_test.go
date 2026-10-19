@@ -25,3 +25,17 @@ func TestScopeAwareRoutesExist(t *testing.T) {
 		}
 	}
 }
+
+// A read-only POST that is renamed falls out of the list and forgets the overview again; this keeps the list honest.
+func TestReadOnlyPostRoutesExist(t *testing.T) {
+	r := Run(&handler.Handler{}, &middleware.Handler{}, &middleware.OidcHandler{}, "", gin.TestMode, nil)
+	registered := map[string]bool{}
+	for _, rt := range r.Routes() {
+		registered[rt.Method+" "+rt.Path] = true
+	}
+	for _, route := range handler.ReadOnlyPostRoutes() {
+		if !registered[route] {
+			t.Errorf("read-only POST %q is not registered", route)
+		}
+	}
+}

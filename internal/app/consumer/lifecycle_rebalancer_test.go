@@ -37,9 +37,9 @@ func (r *lifecycleRebalanceRepo) MarkLifecycleChecked(_ context.Context, ids []u
 	return nil
 }
 
-// A mailbox whose Warmbly Cloud report is missing or stale is neither rested,
-// resumed nor has its probation restarted; a real hold beside it still rests.
-func TestLifecycleRebalancerLeavesUnknownCloudEvidenceAlone(t *testing.T) {
+// A missing or stale Warmbly Cloud report never rests or resumes a mailbox, and
+// restarts a running rest's probation; a real hold beside it still rests.
+func TestLifecycleRebalancerNeverRestsOnUnknownCloudEvidence(t *testing.T) {
 	served := time.Now().Add(-2 * models.RestProbation)
 	active, resting, held := uuid.New(), uuid.New(), uuid.New()
 	repo := &lifecycleRebalanceRepo{moved: map[uuid.UUID]models.SendLifecycle{}, candidates: []repository.LifecycleCandidate{
@@ -55,8 +55,8 @@ func TestLifecycleRebalancerLeavesUnknownCloudEvidenceAlone(t *testing.T) {
 	if _, ok := repo.moved[resting]; ok {
 		t.Fatalf("unknown evidence moved a resting mailbox to %q", repo.moved[resting])
 	}
-	if len(repo.restarted) != 0 {
-		t.Fatalf("unknown evidence restarted probation for %v", repo.restarted)
+	if len(repo.restarted) != 1 || repo.restarted[0] != resting {
+		t.Fatalf("restarted probation for %v, want only the resting mailbox", repo.restarted)
 	}
 	if repo.moved[held] != models.SendLifecycleResting {
 		t.Fatalf("a real quarantine moved to %q, want resting", repo.moved[held])

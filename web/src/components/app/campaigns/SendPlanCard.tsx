@@ -53,6 +53,11 @@ const LIMIT_META: Record<SendLimitKind, LimitMeta> = {
         hint: "A mailbox is quarantined or blocked by its warmup health and sends nothing cold until that lifts.",
         to: "/app/emails",
     },
+    cloud_status_hold: {
+        label: "Waiting for Warmbly Cloud status",
+        hint: "Warmbly Cloud has not reported a current status for a mailbox it warms. It sends nothing cold until one arrives; this is not a block.",
+        to: "/app/emails",
+    },
     send_recovery: {
         label: "Send recovery hold",
         hint: "A mailbox has an unresolved send or provider refusal. Healthy mailboxes remain available; investigate the held send before resolving it.",
@@ -122,6 +127,7 @@ const STATE_META: Record<MailboxPlan["state"], { label: string; tone: string }> 
     domain_auth: { label: "Auth failing", tone: "bg-rose-50 text-rose-700 ring-rose-200" },
     resting: { label: "Resting", tone: "bg-slate-100 text-slate-600 ring-slate-200" },
     health_hold: { label: "Health hold", tone: "bg-rose-50 text-rose-700 ring-rose-200" },
+    cloud_status_hold: { label: "Waiting for Cloud", tone: "bg-amber-50 text-amber-700 ring-amber-200" },
     send_recovery: { label: "Send recovery", tone: "bg-rose-50 text-rose-700 ring-rose-200" },
     send_cooldown: { label: "Cooling down", tone: "bg-amber-50 text-amber-700 ring-amber-200" },
     send_authority: { label: "Send unavailable", tone: "bg-amber-50 text-amber-700 ring-amber-200" },

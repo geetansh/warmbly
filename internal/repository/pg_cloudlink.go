@@ -59,6 +59,19 @@ type cloudLinkRepository struct {
 
 var errNoLinkEncrypter = errors.New("credential encrypter not configured (set CREDENTIALS_ENCRYPTION_KEY)")
 
+// CloudStatusReader reads what each Cloud-warmed mailbox shows, by the rule GetCloudStandings uses.
+type CloudStatusReader interface {
+	CloudStatuses(ctx context.Context, mailboxes []models.CloudLinkMailbox) (map[uuid.UUID]*models.WarmupHealthInfo, error)
+}
+
+func (r *cloudLinkRepository) CloudStatuses(ctx context.Context, mailboxes []models.CloudLinkMailbox) (map[uuid.UUID]*models.WarmupHealthInfo, error) {
+	linked := make(map[uuid.UUID]*models.CloudLinkMailbox, len(mailboxes))
+	for i := range mailboxes {
+		linked[mailboxes[i].EmailAccountID] = &mailboxes[i]
+	}
+	return cloudStatuses(ctx, r.db, linked)
+}
+
 // NewCloudLinkRepository seals the instance token with the mailbox credential key.
 func NewCloudLinkRepository(db *pgxpool.Pool, enc *encrypt.Encrypter) CloudLinkRepository {
 	return &cloudLinkRepository{db: db, encrypt: enc}
