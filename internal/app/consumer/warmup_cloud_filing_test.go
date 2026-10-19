@@ -106,3 +106,32 @@ func TestWarmupFilingRecoveryDropsCloudFilingsBeforeRetrying(t *testing.T) {
 		t.Fatalf("calls after a failed drop = %v, want %v", recovery.calls, want)
 	}
 }
+
+// Only an active enrollment hands filing to the cloud; any other mailbox still gets a durable filing here.
+func TestFilingIsQueuedForAMailboxTheCloudDoesNotHold(t *testing.T) {
+	for name, cloud := range map[string]*warmupInboxCloud{
+		"not enrolled":    {notEnrolled: true},
+		"still enrolling": {pendingEnroll: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			worker := uuid.New()
+			e, _ := leakedWarmup()
+			pub := &backfillPublisher{}
+			recovery := &recoveryStub{id: uuid.New()}
+			s := &JobsService{
+				CloudLink:          cloud,
+				WarmupRecoveryRepo: recovery,
+				Publisher:          pub,
+				EmailRepository: backfillEmailRepo{account: &models.Email{
+					ID: e.Message.EmailID, WorkerID: &worker, WarmupPlacement: models.WarmupPlacementFolder,
+				}},
+			}
+			if err := s.fileWarmupOutOfMailbox(context.Background(), &e); err != nil {
+				t.Fatal(err)
+			}
+			if len(recovery.queued) != 1 || len(pub.actions) != 1 || pub.actions[0].FilingID != recovery.id.String() {
+				t.Fatalf("queued %d, published %+v, want one durable filing", len(recovery.queued), pub.actions)
+			}
+		})
+	}
+}

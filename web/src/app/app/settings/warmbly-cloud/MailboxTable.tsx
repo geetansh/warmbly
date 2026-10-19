@@ -98,7 +98,7 @@ export default function MailboxTable() {
                                                 {row.enrolled && row.enrollment_error && (
                                                     <span className="inline-flex items-center gap-1 text-amber-700 ml-1" title={row.enrollment_error.message}>
                                                         <AlertTriangleIcon className="w-3 h-3" />
-                                                        Not accepted: {row.enrollment_error.message}
+                                                        {cloud ? "Update not accepted" : "Not accepted"}: {row.enrollment_error.message}
                                                     </span>
                                                 )}
                                                 {cloud?.errors && cloud.errors.length > 0 && (

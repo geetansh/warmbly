@@ -95,8 +95,9 @@ func (r *advisorRepository) loadMailboxes(ctx context.Context, orgID uuid.UUID, 
 			COALESCE(dl.bounces, 0), COALESCE(dl.complaints, 0),
 			COALESCE(w.sent7, 0), COALESCE(w.recv7, 0),
 			ws.major, ws.major_spam, ws.other, ws.other_spam,
-			COALESCE(p.health_state, ''), COALESCE(p.last_health_score, 0), COALESCE(p.last_health_reason, ''),
-			COALESCE(p.blocked_until > NOW(), false) AS pool_blocked,
+			CASE WHEN cstatus.cloud_only THEN 'blocked' ELSE COALESCE(p.health_state, '') END, COALESCE(p.last_health_score, 0),
+			CASE WHEN cstatus.cloud_only THEN '` + models.WarmupReasonCloudEvidenceUnavailable + `' ELSE COALESCE(p.last_health_reason, '') END,
+			(NOT cstatus.cloud_only AND COALESCE(p.blocked_until > NOW(), false)) AS pool_blocked,
 			COALESCE(err.n, 0),
 			COALESCE(camp.active, false),
 			ea.send_lifecycle,
@@ -136,8 +137,10 @@ func (r *advisorRepository) loadMailboxes(ctx context.Context, orgID uuid.UUID, 
 		) w ON true
 		LEFT JOIN LATERAL (` + placementEvidenceSQL("ea.id", "$2") + `
 		) ws ON true
-		LEFT JOIN LATERAL (` + warmupStandingSQL("ea.id") + `
+		LEFT JOIN LATERAL (` + warmupKnownStandingSQL("ea.id") + `
 		) p ON true
+		-- Unknown Cloud evidence reads as unavailable unless a real hold stands beside it.
+		CROSS JOIN LATERAL (SELECT (` + cloudStandingUnknownSQL("ea.id") + ` AND NOT ` + liveHoldSQL("p") + `) AS cloud_only) cstatus
 		LEFT JOIN LATERAL (
 			SELECT COUNT(*) AS n
 			FROM email_account_errors eae

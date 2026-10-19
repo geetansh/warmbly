@@ -52,7 +52,9 @@ func (r *campaignPoolHealthReads) GetHealthState(ctx context.Context, id uuid.UU
 func (r *campaignPoolHealthReads) GetHealthStates(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]repository.WarmupHealthRead, error) {
 	r.batch++
 	if r.batchErr != nil {
-		return nil, r.batchErr
+		err := r.batchErr
+		r.batchErr = nil
+		return nil, err
 	}
 	return r.WarmupRepository.GetHealthStates(ctx, ids)
 }
@@ -111,8 +113,8 @@ func TestLiveCampaignPoolBatchFailuresKeepSafety(t *testing.T) {
 				if !errors.Is(err, failure) || pair != nil || tasks.single != 0 || health.batch != 0 {
 					t.Fatalf("unknown budget must not send: pair=%v err=%v task singles=%d health batches=%d", pair, err, tasks.single, health.batch)
 				}
-			} else if err != nil && !errors.Is(err, ErrCampaignDeferred) || pair == nil || health.single != 1 || health.batch != 1 {
-				t.Fatalf("health must fall back to the individual read: pair=%v err=%v health singles=%d batches=%d", pair, err, health.single, health.batch)
+			} else if err != nil && !errors.Is(err, ErrCampaignDeferred) || pair == nil || health.single != 0 || health.batch != 2 {
+				t.Fatalf("health must fall back to a one-mailbox rich read: pair=%v err=%v health singles=%d batches=%d", pair, err, health.single, health.batch)
 			}
 		})
 	}

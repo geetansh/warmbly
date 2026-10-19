@@ -166,6 +166,10 @@ func (w *WMail) storeNew(ctx context.Context, msg *models.EmailMessageData, data
 		evidence.ObservedAt = time.Now().UTC()
 		data.Flags = models.WithReceivedEvidence(data.Flags, evidence)
 	}
+	complaint, err := w.complaintReport(ctx, msg)
+	if err != nil {
+		return err
+	}
 	// Body first: a map entry without a body would make the message "known"
 	// on the next pass and never retried, while an orphaned body is harmless.
 	if err := w.StoreBody(ctx, data.ID, &emsg.EmailBlob{
@@ -190,7 +194,6 @@ func (w *WMail) storeNew(ctx context.Context, msg *models.EmailMessageData, data
 	// practice, and deciding that here by skipping the second would be this
 	// function guessing at a MIME question the parsers already answer.
 	bounce := w.bounceReport(msg)
-	complaint := w.complaintReport(msg)
 	var reportAbout string
 	switch {
 	case bounce != nil:
@@ -221,7 +224,7 @@ func (w *WMail) storeNew(ctx context.Context, msg *models.EmailMessageData, data
 	if err := w.EmailMessageMapRepository.Add(ctx, mapping); err != nil {
 		return err
 	}
-	err := w.onEvent(models.JobEventTypeNewEmail, arrival)
+	err = w.onEvent(models.JobEventTypeNewEmail, arrival)
 	if err != nil {
 		// The entry would mark a message that never reached the unibox as
 		// known, and every later pass would skip it; drop it so it is re-offered.

@@ -55,6 +55,9 @@ func (s *uniboxService) getByID(ctx context.Context, orgID, id uuid.UUID, markSe
 			if changed, err := s.uniboxRepository.MarkSeenBulk(ctx, orgID, []uuid.UUID{id}, true); err == nil {
 				msg.Seen = true
 				s.relaySeen(ctx, orgID, changed)
+				if len(changed) > 0 {
+					s.ForgetOverview(orgID)
+				}
 			}
 		}
 		resp.ID = msg.ID

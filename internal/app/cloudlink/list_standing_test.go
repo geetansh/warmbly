@@ -196,3 +196,38 @@ func TestMailboxListRefreshesOnlyValidatedStandingOnItsOwningLink(t *testing.T) 
 		})
 	}
 }
+
+type listedStatusRepo struct {
+	*listedStandingRepo
+	statuses map[uuid.UUID]*models.WarmupHealthInfo
+}
+
+func (r *listedStatusRepo) CloudStatuses(context.Context, []models.CloudLinkMailbox) (map[uuid.UUID]*models.WarmupHealthInfo, error) {
+	return r.statuses, nil
+}
+
+// Settings shows what the mailbox drawer shows: a ledger hold beside a stale
+// Cloud report is the hold, not "unavailable".
+func TestMailboxListShowsTheStatusTheDrawerShows(t *testing.T) {
+	org, account, instance := uuid.New(), uuid.New(), uuid.New()
+	old := time.Now().Add(-time.Hour)
+	until := time.Now().Add(48 * time.Hour)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode([]models.PoolLinkMailboxState{{RemoteID: account, Health: &models.WarmupHealthInfo{State: "future_state"}}})
+	}))
+	t.Cleanup(srv.Close)
+	m := &models.CloudLinkMailbox{EmailAccountID: account, RemoteID: account, InstanceID: instance, EnrollmentState: "active", Standing: &models.WarmupHealthInfo{State: "healthy"}, StandingObservedAt: &old}
+	hold := &models.WarmupHealthInfo{Source: models.WarmupHealthSourceCloud, State: "quarantined", Reason: "complaints", BlockedUntil: &until}
+	r := &listedStatusRepo{
+		listedStandingRepo: &listedStandingRepo{workspaceLinkRepo: &workspaceLinkRepo{
+			links:     map[uuid.UUID]*models.CloudLink{instance: {InstanceID: instance, CloudURL: srv.URL, Token: "owning-link"}},
+			mailboxes: map[uuid.UUID]*models.CloudLinkMailbox{account: m},
+		}},
+		statuses: map[uuid.UUID]*models.WarmupHealthInfo{account: hold},
+	}
+	s := &service{repo: r, emails: enrollmentEmails{stubEmails{account: &models.Email{ID: account, OrganizationID: &org, Status: "active"}}}}
+	rows, xerr := s.ListMailboxes(context.Background(), org)
+	if xerr != nil || len(rows) != 1 || rows[0].Cloud == nil || rows[0].Cloud.Health != hold {
+		t.Fatalf("Settings row = %+v, %v; want the drawer's ledger hold", rows, xerr)
+	}
+}

@@ -146,6 +146,8 @@ type Service interface {
 	// IsEnrolled is the local warmup scheduler's stand-down check; fails closed to false.
 	IsEnrolled(ctx context.Context, accountID uuid.UUID) bool
 	CheckEnrollment(ctx context.Context, accountID uuid.UUID) (bool, error)
+	// FilesWarmupMail is whether the mailbox's enrollment is active, so the cloud files the warmup it sends it.
+	FilesWarmupMail(ctx context.Context, accountID uuid.UUID) (bool, error)
 	// VerifyWarmupToken is the consumer's check that warmup mail in an enrolled mailbox is the cloud's.
 	VerifyWarmupToken(ctx context.Context, accountID uuid.UUID, token string) (bool, error)
 	// IsCloudWarmupDelivery is the same check for warmup mail whose verify header did not survive.
@@ -156,6 +158,8 @@ type Service interface {
 	SyncStanding(ctx context.Context) ([]models.CloudLinkStandingChange, *errx.Error)
 	// OnStandingChange registers mailbox-list transitions; SyncStanding returns its own.
 	OnStandingChange(func(context.Context, models.CloudLinkStandingChange))
+	// OnEnrollmentRefusalChange registers a mailbox whose kept Cloud refusal was set, replaced or cleared.
+	OnEnrollmentRefusalChange(func(context.Context, uuid.UUID))
 	// IsCloudWarmupThreadReply asks by ancestry: whether what a tokenless
 	// message answers is a turn of one of the cloud's warmup conversations.
 	IsCloudWarmupThreadReply(ctx context.Context, accountID uuid.UUID, messageID string, inReplyTo []string) (bool, error)
@@ -185,6 +189,7 @@ type service struct {
 	disconnected    []func(context.Context, uuid.UUID)
 	standingChanged func(context.Context, models.CloudLinkStandingChange)
 	settingsChanged func(context.Context, []uuid.UUID)
+	refusalChanged  func(context.Context, uuid.UUID)
 }
 
 func (s *service) OnStandingChange(fn func(context.Context, models.CloudLinkStandingChange)) {
@@ -483,6 +488,14 @@ func (s *service) CheckEnrollment(ctx context.Context, accountID uuid.UUID) (boo
 	return s.repo.IsEnrolled(ctx, accountID)
 }
 
+func (s *service) FilesWarmupMail(ctx context.Context, accountID uuid.UUID) (bool, error) {
+	m, err := s.repo.GetByAccount(ctx, accountID)
+	if err != nil {
+		return false, err
+	}
+	return m != nil && m.EnrollmentState == "active", nil
+}
+
 func (s *service) ListMailboxes(ctx context.Context, orgID uuid.UUID) ([]models.CloudLinkMailboxRow, *errx.Error) {
 	if !reconciliationLocked(ctx) {
 		var rows []models.CloudLinkMailboxRow
@@ -499,6 +512,7 @@ func (s *service) ListMailboxes(ctx context.Context, orgID uuid.UUID) ([]models.
 	}
 	enrolled, err := s.repo.ListForOrg(ctx, orgID, nil)
 	if err != nil {
+		log.Error().Err(err).Str("organization_id", orgID.String()).Msg("cloud link: enrolled mailboxes could not be listed")
 		return nil, errx.InternalError()
 	}
 	byAccount := make(map[uuid.UUID]models.CloudLinkMailbox, len(enrolled))
@@ -550,6 +564,7 @@ func (s *service) ListMailboxes(ctx context.Context, orgID uuid.UUID) ([]models.
 					cloudByAccount[e.EmailAccountID] = state
 					if state == nil || state.Health == nil || !knownHealthState(state.Health.State) {
 						if err := s.repo.InvalidateStanding(ctx, e.EmailAccountID); err != nil {
+							log.Error().Err(err).Str("account_id", e.EmailAccountID.String()).Msg("cloud link: stale standing could not be invalidated")
 							return nil, errx.InternalError()
 						}
 						e.StandingObservedAt = nil
@@ -575,6 +590,26 @@ func (s *service) ListMailboxes(ctx context.Context, orgID uuid.UUID) ([]models.
 		}
 	}
 
+	// Settings shows what the mailbox drawer shows, so a ledger hold is never called unavailable.
+	var statuses map[uuid.UUID]*models.WarmupHealthInfo
+	if reader, ok := s.repo.(repository.CloudStatusReader); ok {
+		listed := make([]models.CloudLinkMailbox, 0, len(byAccount))
+		for _, e := range byAccount {
+			listed = append(listed, e)
+		}
+		var err error
+		if statuses, err = reader.CloudStatuses(ctx, listed); err != nil {
+			log.Error().Err(err).Str("organization_id", orgID.String()).Msg("cloud link: mailbox statuses could not be read")
+			return nil, errx.InternalError()
+		}
+	}
+	healthFor := func(e models.CloudLinkMailbox) *models.WarmupHealthInfo {
+		if statuses != nil {
+			return statuses[e.EmailAccountID]
+		}
+		return e.EffectiveStanding(time.Now())
+	}
+
 	rows := make([]models.CloudLinkMailboxRow, 0, len(accounts))
 	seen := make(map[uuid.UUID]bool, len(accounts))
 	add := func(a *models.Email) {
@@ -595,7 +630,7 @@ func (s *service) ListMailboxes(ctx context.Context, orgID uuid.UUID) ([]models.
 			row.Cloud = cloudByAccount[a.ID]
 			// The recorded standing covers a mailbox the cloud holds out of its pool.
 			if row.Cloud != nil {
-				row.Cloud.Health = e.EffectiveStanding(time.Now())
+				row.Cloud.Health = healthFor(e)
 			}
 		}
 		rows = append(rows, row)
@@ -731,6 +766,9 @@ func (s *service) Enroll(ctx context.Context, orgID, accountID uuid.UUID) (*mode
 	if _, err := s.repo.Enroll(ctx, acc.ID, acc.ID, l.InstanceID, false); err != nil {
 		// The durable intent remains unavailable locally until retry confirms enrollment.
 		return nil, errx.InternalError()
+	}
+	if m != nil && m.EnrollmentError != nil {
+		s.announceEnrollmentRefusal(ctx, acc.ID)
 	}
 	s.syncLocalPool(ctx, acc.ID)
 	s.recordStanding(ctx, acc.ID, state.Health, true)

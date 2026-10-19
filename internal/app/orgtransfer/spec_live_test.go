@@ -126,3 +126,40 @@ func TestLiveTablesAreInDependencyOrder(t *testing.T) {
 		}
 	}
 }
+
+// Every table with an organization_id is in Tables or ExcludedTables. A table in
+// neither is silently absent from every archive; this is the coverage check
+// ExcludedTables names. Tables scoped through a parent are not seen here.
+func TestLiveEveryOrgTableIsRegistered(t *testing.T) {
+	pool := specLivePool(t)
+	ctx := context.Background()
+
+	rows, err := pool.Query(ctx, `
+		SELECT c.table_name
+		FROM information_schema.columns c
+		JOIN information_schema.tables t USING (table_schema, table_name)
+		WHERE c.table_schema = 'public' AND c.column_name = 'organization_id'
+		  AND t.table_type = 'BASE TABLE'
+		ORDER BY c.table_name
+	`)
+	if err != nil {
+		t.Fatalf("read org-scoped tables: %v", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			t.Fatalf("scan table name: %v", err)
+		}
+		if _, carried := TableByName[name]; carried {
+			continue
+		}
+		if _, excluded := ExcludedTables[name]; excluded {
+			continue
+		}
+		t.Errorf("%s has organization_id but is in neither Tables nor ExcludedTables", name)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("read org-scoped tables: %v", err)
+	}
+}

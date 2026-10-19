@@ -84,6 +84,7 @@ const (
 	SendLimitDomainAuth         = "domain_auth"
 	SendLimitResting            = "resting"
 	SendLimitHealthHold         = "warmup_health_hold"
+	SendLimitCloudStatusHold    = "cloud_status_hold"
 	SendLimitRecovery           = "send_recovery"
 	SendLimitCooldown           = "send_cooldown"
 	SendLimitOtherCampaigns     = "other_campaigns"
@@ -166,7 +167,7 @@ type CampaignMailboxPlan struct {
 	ExpectedRemaining int `json:"expected_remaining"`
 	// State is why the mailbox is or is not sending right now. One of
 	// "sending", "budget_spent", "hours_closed", "no_working_day",
-	// "domain_auth", "resting", "health_hold".
+	// "domain_auth", "resting", "health_hold", "cloud_status_hold".
 	State string `json:"state"`
 	// ReopensAt is when a mailbox outside its own hours is next open.
 	ReopensAt *time.Time `json:"reopens_at,omitempty"`
@@ -189,6 +190,7 @@ const (
 	MailboxPlanDomainAuth   = "domain_auth"
 	MailboxPlanResting      = "resting"
 	MailboxPlanHealthHold   = "health_hold"
+	MailboxPlanCloudStatus  = "cloud_status_hold"
 	MailboxPlanRecovery     = "send_recovery"
 	MailboxPlanCooldown     = "send_cooldown"
 	MailboxPlanAdmission    = "send_authority"

@@ -228,7 +228,7 @@ func TestLiveCloudWarmedFilingsAreNeitherClaimedNorKept(t *testing.T) {
 	requireSchemaVersion(t, pool, 270)
 	ctx := context.Background()
 	f := newSharedOrgFixture(t, pool)
-	local, cloud, worker, instance := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	local, cloud, enrolling, worker, instance := uuid.New(), uuid.New(), uuid.New(), uuid.New(), uuid.New()
 	if _, err := pool.Exec(ctx, `INSERT INTO fleet_nodes (id, role, name) VALUES ($1, 'worker', 'cloud-filing-test')`, worker); err != nil {
 		t.Fatal(err)
 	}
@@ -244,23 +244,27 @@ func TestLiveCloudWarmedFilingsAreNeitherClaimedNorKept(t *testing.T) {
 			`DELETE FROM cloud_link WHERE instance_id = ANY($1)`,
 			`DELETE FROM fleet_nodes WHERE id = ANY($1)`,
 		} {
-			if _, err := pool.Exec(ctx, q, []uuid.UUID{local, cloud, worker, instance}); err != nil {
+			if _, err := pool.Exec(ctx, q, []uuid.UUID{local, cloud, enrolling, worker, instance}); err != nil {
 				t.Error(err)
 			}
 		}
 	})
-	for _, id := range []uuid.UUID{local, cloud} {
+	for _, id := range []uuid.UUID{local, cloud, enrolling} {
 		if _, err := pool.Exec(ctx, `INSERT INTO email_accounts (id, user_id, organization_id, email, name, signature_plain, signature_html, provider, status, worker_id)
 			VALUES ($1, $2, $3, $4, 'Filing', '', '', 'smtp_imap', 'active', $5)`, id, f.owner, f.org, uuid.NewString()+"@example.test", worker); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if _, err := NewCloudLinkRepository(pool, nil).Enroll(ctx, cloud, cloud, instance, false); err != nil {
+	links := NewCloudLinkRepository(pool, nil)
+	if _, err := links.Enroll(ctx, cloud, cloud, instance, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := links.BeginEnrollment(ctx, enrolling, enrolling, instance); err != nil {
 		t.Fatal(err)
 	}
 	repo := NewWarmupRecoveryRepository(pool)
 	ids := map[uuid.UUID]uuid.UUID{}
-	for _, account := range []uuid.UUID{local, cloud} {
+	for _, account := range []uuid.UUID{local, cloud, enrolling} {
 		id, err := repo.EnqueueFiling(ctx, models.WarmupEmailAction{EmailID: account, UserID: f.owner, RFCMessageID: "<" + account.String() + "@example.test>", Actions: []string{models.WarmupActionFile}})
 		if err != nil {
 			t.Fatal(err)
@@ -274,9 +278,10 @@ func TestLiveCloudWarmedFilingsAreNeitherClaimedNorKept(t *testing.T) {
 	}
 	dropped, err := repo.DropCloudFilings(ctx)
 	if err != nil || dropped != 1 {
-		t.Fatalf("dropped %d, err %v, want the Cloud mailbox's one filing", dropped, err)
+		t.Fatalf("dropped %d, err %v, want the actively warmed mailbox's one filing", dropped, err)
 	}
-	for account, want := range map[uuid.UUID]int{local: 1, cloud: 0} {
+	// The enrolling mailbox's filing is parked, not lost: it stays until the enrollment settles.
+	for account, want := range map[uuid.UUID]int{local: 1, cloud: 0, enrolling: 1} {
 		var n int
 		if err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM warmup_pending_filings WHERE email_account_id = $1`, account).Scan(&n); err != nil || n != want {
 			t.Fatalf("filings for %v = %d (%v), want %d", account, n, err, want)

@@ -29,14 +29,15 @@ export function cloudStandingUnavailable(h?: { reason?: string } | null) {
 }
 
 export type CloudStandingGap =
-    | { kind: "enrolling"; error: CloudLinkEnrollmentError | null }
+    // update: Cloud already holds the mailbox and keeps warming it while a resend (a new sign-in) is pending.
+    | { kind: "enrolling"; error: CloudLinkEnrollmentError | null; update: boolean }
     | { kind: "removing" }
     | { kind: "unreported" };
 
 // Why this one mailbox's Warmbly Cloud standing is not known yet; null when it is, or Cloud does not warm it.
 export function cloudStandingGap(row?: CloudLinkMailboxRow | null, status?: Pick<AccountStatus, "warmup_health"> | null): CloudStandingGap | null {
     if (row?.enrolled) {
-        if (row.enrollment_state === "pending_enroll") return { kind: "enrolling", error: row.enrollment_error ?? null };
+        if (row.enrollment_state === "pending_enroll") return { kind: "enrolling", error: row.enrollment_error ?? null, update: !!row.cloud };
         if (row.enrollment_state === "pending_remove") return { kind: "removing" };
         if (!row.cloud?.health || cloudStandingUnavailable(row.cloud.health)) return { kind: "unreported" };
     }
@@ -54,6 +55,11 @@ const sentence = (s: string) => (/[.!?]$/.test(s.trim()) ? s.trim() : `${s.trim(
 export function cloudStandingGapCopy(gap: CloudStandingGap): CloudStandingGapCopy {
     switch (gap.kind) {
         case "enrolling":
+            if (gap.update) {
+                return gap.error
+                    ? { label: "Update refused", title: `Warmbly Cloud refused this mailbox's update: ${sentence(gap.error.message)} It keeps the copy it already had; campaign sends wait until the update is accepted.`, refused: true }
+                    : { label: "Updating", title: "Sending this mailbox's update to Warmbly Cloud. Campaign sends wait until it is accepted.", refused: false };
+            }
             return gap.error
                 ? { label: "Cloud refused", title: `Warmbly Cloud has not accepted this mailbox: ${sentence(gap.error.message)} Campaign sends wait until it does.`, refused: true }
                 : { label: "Enrolling", title: "Waiting for Warmbly Cloud to accept this mailbox. Campaign sends wait until it reports a status.", refused: false };
@@ -64,14 +70,16 @@ export function cloudStandingGapCopy(gap: CloudStandingGap): CloudStandingGapCop
     }
 }
 
-export type MailboxReading = "healthy" | "warming" | "issue" | "pending_cloud";
+// cloud_refused needs attention, since a refusal does not clear by itself; pending_cloud is waiting on Cloud alone.
+export type MailboxReading = "healthy" | "warming" | "issue" | "pending_cloud" | "cloud_refused";
 
 // One mailbox's place in the summary. The unknown-standing warning adds exactly one issue, so a lone one is the gap itself.
 export function mailboxReading(box: Inbox, status: AccountStatus, cloud?: CloudLinkMailboxRow | null): MailboxReading {
     if (box.status !== "active" || box.auth_state === "failing" || status.errors?.length) return "issue";
     const health = status.health?.status;
     const gapOnly = health === "healthy" || (health === "warning" && cloudStandingUnavailable(status.warmup_health) && (status.health.issues?.length ?? 0) <= 1);
-    if (gapOnly && cloudStandingGap(cloud, status)) return "pending_cloud";
+    const gap = gapOnly ? cloudStandingGap(cloud, status) : null;
+    if (gap) return gap.kind === "enrolling" && gap.error ? "cloud_refused" : "pending_cloud";
     if (health !== "healthy") return "issue";
     const warming = cloud?.enrolled ? !!cloud.cloud?.warmup?.enabled && !cloudWarmupPaused(cloud.cloud) : diagnosticWarmupActive(box);
     return warming ? "warming" : "healthy";
@@ -98,7 +106,7 @@ export function tallyMailboxes(
         if (!status) continue;
         const reading = mailboxReading(box, status, cloudFor(box.id));
         if (reading === "pending_cloud") t.pendingCloud++;
-        else if (reading === "issue") t.issues++;
+        else if (reading === "issue" || reading === "cloud_refused") t.issues++;
         else t[reading]++;
     }
     return t;

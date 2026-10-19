@@ -150,8 +150,8 @@ func TestUnknownHealthWithNoClockStaysResting(t *testing.T) {
 }
 
 // A missing Warmbly Cloud report holds sends at the gate, but it is not a
-// verdict: it must not rest a mailbox, restart its probation or resume it.
-func TestCloudUnknownNeverRestsOrRestarts(t *testing.T) {
+// verdict: it never starts a rest, and time without one never counts as probation.
+func TestCloudUnknownNeverStartsARestOrServesProbation(t *testing.T) {
 	now := time.Date(2026, 3, 10, 12, 0, 0, 0, time.UTC)
 	served := now.Add(-models.RestProbation)
 
@@ -160,9 +160,10 @@ func TestCloudUnknownNeverRestsOrRestarts(t *testing.T) {
 		t.Fatalf("active with unknown cloud evidence gave %+v, want it left active", d)
 	}
 
+	// A Cloud hold that lapsed during an outage must not resume on the first fresh report.
 	d = Decide(models.SendLifecycleResting, &served, "", true, now)
-	if d.Next != models.SendLifecycleResting || d.RestartProbation {
-		t.Fatalf("resting with unknown cloud evidence gave %+v, want it left resting with its clock running", d)
+	if d.Next != models.SendLifecycleResting || !d.RestartProbation {
+		t.Fatalf("resting with unknown cloud evidence gave %+v, want it resting with probation restarted", d)
 	}
 	if d.Reason == "" {
 		t.Fatal("holding on unknown cloud evidence needs a reason the owner can read")

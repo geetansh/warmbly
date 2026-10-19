@@ -653,11 +653,37 @@ func (h *Handler) UniboxReply(c *gin.Context) {
 	c.JSON(http.StatusOK, resp)
 }
 
+// readOnlyPosts take a POST only to carry a query body and are gated on a read permission, so they write nothing the overview counts.
+var readOnlyPosts = map[string]bool{
+	"/v1/campaign-template-preview":   true,
+	"/v1/campaigns-estimate":          true,
+	"/v1/contacts/search":             true,
+	"/v1/segments/preview":            true,
+	"/v1/segments/:id/members/lookup": true,
+	"/v1/templates/:id/render":        true,
+	"/v1/crm/deals/search":            true,
+	"/v1/crm/deals/summary":           true,
+	"/v1/crm/tasks/search":            true,
+	"/v1/crm/tasks/summary":           true,
+}
+
+// ReadOnlyPostRoutes lists readOnlyPosts as "POST path", for the test that keeps each one registered.
+func ReadOnlyPostRoutes() []string {
+	out := make([]string, 0, len(readOnlyPosts))
+	for path := range readOnlyPosts {
+		out = append(out, http.MethodPost+" "+path)
+	}
+	return out
+}
+
 // ForgetUniboxOverviewOnWrite drops the organization's shared unibox overview after any successful write.
 func (h *Handler) ForgetUniboxOverviewOnWrite(c *gin.Context) {
 	c.Next()
 	switch c.Request.Method {
 	case http.MethodGet, http.MethodHead, http.MethodOptions:
+		return
+	}
+	if readOnlyPosts[c.FullPath()] {
 		return
 	}
 	if h.UniboxService == nil || c.Writer.Status() >= http.StatusBadRequest {

@@ -59,11 +59,16 @@ type warmupInboxCloud struct {
 	tokenOK, deliveryOK, threadOK          bool
 	tokenErr, deliveryErr, threadErr       error
 	enrollmentErr                          error
+	notEnrolled, pendingEnroll             bool
 	tokenCalls, deliveryCalls, threadCalls int
 }
 
 func (c *warmupInboxCloud) CheckEnrollment(context.Context, uuid.UUID) (bool, error) {
-	return true, c.enrollmentErr
+	return !c.notEnrolled, c.enrollmentErr
+}
+
+func (c *warmupInboxCloud) FilesWarmupMail(context.Context, uuid.UUID) (bool, error) {
+	return !c.notEnrolled && !c.pendingEnroll, c.enrollmentErr
 }
 
 func (c *warmupInboxCloud) VerifyWarmupToken(ctx context.Context, _ uuid.UUID, _ string) (bool, error) {
@@ -162,9 +167,11 @@ type warmupCleanupInbox struct {
 	repository.UniboxRepository
 	events  []models.JobEventNewEmail
 	deleted []uuid.UUID
+	lists   int
 }
 
 func (r *warmupCleanupInbox) ListWarmupReviewCandidates(_ context.Context, afterID uuid.UUID, limit int) ([]models.JobEventNewEmail, error) {
+	r.lists++
 	var out []models.JobEventNewEmail
 	for _, e := range r.events {
 		if e.Message.ID.String() > afterID.String() {
@@ -191,7 +198,7 @@ func TestWarmupInboxCleanupRetriesCloudFailureWithoutDeletingMail(t *testing.T) 
 	s := &JobsService{UniboxRepository: inbox, CloudLink: cloud}
 	sweep := &warmupInboxSweep{}
 	done, err := s.cleanWarmupInboxBatch(context.Background(), sweep)
-	if resume, held := sweep.held[e.Message.EmailID]; err == nil || !done || !held || resume != uuid.Nil || len(inbox.deleted) != 0 {
+	if h, held := sweep.held[e.Message.EmailID]; err == nil || !done || !held || h.resume != uuid.Nil || len(inbox.deleted) != 0 {
 		t.Fatalf("failed verification was not held for retry or deleted mail: %v %v %v", sweep.held, done, err)
 	}
 	cloud.deliveryErr, cloud.deliveryOK = nil, true

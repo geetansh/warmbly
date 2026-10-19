@@ -6,10 +6,12 @@ import type Inbox from "@/lib/api/models/app/emails/Inbox";
 import type Tag from "@/lib/api/models/app/Tag";
 import type * as UserModule from "@/hooks/context/user";
 import type AccountStatus from "@/lib/api/models/app/analytics/AccountStatus";
+import type { CloudLinkMailboxRow } from "@/lib/api/models/app/cloudlink/CloudLink";
 import AddressesPage from "./page";
 
-const { tags, rows, statusState, confirm } = vi.hoisted(() => ({
+const { tags, rows, statusState, cloudState, confirm } = vi.hoisted(() => ({
     confirm: vi.fn(),
+    cloudState: { connected: false, rows: new Map<string, CloudLinkMailboxRow>() },
     statusState: { data: [] as AccountStatus[], observations: [] as { status: AccountStatus; observedAt: number; current: boolean }[], isLoading: false, isFetching: false, isError: false, cloudLoading: false, cloudUnavailable: false, emailsLoading: false, emailsError: false, emailsIncomplete: false },
     tags: [
         { id: "sending", title: "Sending account", color: "#0088cc", position: 0 },
@@ -38,7 +40,8 @@ vi.mock("@/lib/api/hooks/app/subscription/useFeatureStatus", () => ({ default: (
 vi.mock("@/lib/api/hooks/auth/useAuthConfig", () => ({ default: () => ({ data: {}, isLoading: false }) }));
 vi.mock("@/lib/api/hooks/app/emails/useMailboxGrants", () => ({ useSigninMigration: () => ({ data: { data: [] } }) }));
 vi.mock("@/lib/api/hooks/app/advisor/useAdvisor", () => ({ useAdvisorEntityIndex: () => ({ get: () => [] }) }));
-vi.mock("@/hooks/useCloudPool", () => ({ default: () => ({ selfHosted: false, connected: false, loading: statusState.cloudLoading, unavailable: statusState.cloudUnavailable, observedAt: 0, rowFor: () => undefined }) }));
+vi.mock("@/hooks/useCloudPool", () => ({ default: () => ({ selfHosted: false, connected: cloudState.connected, workspaceConnected: cloudState.connected, loading: statusState.cloudLoading, unavailable: statusState.cloudUnavailable, observedAt: 0, rowFor: (id: string) => cloudState.rows.get(id) }) }));
+vi.mock("@/components/ui/AnimatedNumber", () => ({ default: ({ value }: { value: number }) => String(value) }));
 vi.mock("@/lib/api/hooks/app/cloudlink/useCloudLink", () => ({
     useEnrollCloudLinkMailbox: () => ({}), useUnenrollCloudLinkMailbox: () => ({}), useCloudLinkMailboxLifecycle: () => ({}),
 }));
@@ -290,5 +293,65 @@ describe("mailbox status while account and Cloud checks settle", () => {
         fireEvent.click(screen.getByRole("button", { name: "Mailbox" }));
         expect(screen.queryAllByText("Last reported issue")).toHaveLength(0);
         expect(screen.queryByText("Last observed: Issue 40")).not.toBeInTheDocument();
+    });
+});
+
+describe("one mailbox waiting on Warmbly Cloud", () => {
+    const conflict = { code: "pool_link_mailbox_conflict", message: "This address already exists in the linked Cloud workspace. Contact Warmbly support." };
+    const cloudRow = (row: Inbox, over: Partial<CloudLinkMailboxRow>): CloudLinkMailboxRow => ({ id: row.id, email: row.email, name: row.name, provider: row.provider, status: "active", enrolled: true, managed: false, cloud: null, ...over });
+    // What the backend reports while Cloud has no current status for the mailbox.
+    const unknownStanding = (row: Inbox) => ({ ...measuredStatus(row), health: { status: "warning", score: 100, issues: ["Warmbly Cloud status unavailable"] }, warmup_health: { state: "blocked", reason: "cloud_evidence_unavailable" } }) as AccountStatus;
+    const rowOf = (email: string) => screen.getAllByRole("row").find((row) => row.textContent?.includes(email))!;
+    const tile = (label: string) => screen.getByText(label, { selector: "span" }).parentElement!.parentElement!;
+    const [sara, kavya, ananya, julie] = rows;
+
+    beforeEach(() => {
+        sessionStorage.clear();
+        vi.spyOn(window, "scrollTo").mockImplementation(() => {});
+        Object.assign(statusState, { isLoading: false, isFetching: false, isError: false, cloudLoading: false, cloudUnavailable: false, emailsLoading: false, emailsError: false, emailsIncomplete: false });
+        cloudState.connected = true;
+        cloudState.rows = new Map([
+            [sara.id, cloudRow(sara, { enrollment_state: "pending_enroll", enrollment_error: conflict })],
+            [kavya.id, cloudRow(kavya, { enrollment_state: "pending_enroll" })],
+        ]);
+        statusState.data = [unknownStanding(sara), unknownStanding(kavya), measuredStatus(ananya), measuredStatus(julie)];
+        statusState.observations = statusState.data.map((status) => ({ status, observedAt: Date.now(), current: true }));
+    });
+    afterEach(() => {
+        cleanup();
+        vi.restoreAllMocks();
+        cloudState.connected = false;
+        cloudState.rows = new Map();
+        statusState.observations = [];
+    });
+
+    it("shows every other mailbox's own status and counts what is known", async () => {
+        await renderPage();
+        expect(screen.queryByText("Unavailable")).not.toBeInTheDocument();
+        for (const box of [ananya, julie]) {
+            expect(within(rowOf(box.email)).getByText("Healthy 100")).toBeInTheDocument();
+            expect(within(rowOf(box.email)).getAllByText("Off").length).toBeGreaterThan(0);
+        }
+        const refused = rowOf(sara.email);
+        expect(within(refused).getAllByText("Cloud refused").length).toBeGreaterThan(0);
+        expect(within(refused).getAllByTitle(/Contact Warmbly support\./).length).toBeGreaterThan(0);
+        expect(within(refused).getAllByText("Refused").length).toBeGreaterThan(0);
+        const enrolling = rowOf(kavya.email);
+        expect(within(enrolling).getAllByText("Enrolling").length).toBeGreaterThan(0);
+        expect(within(enrolling).getByText("Pending Cloud")).toBeInTheDocument();
+        expect(within(enrolling).queryByText(/At risk/)).not.toBeInTheDocument();
+
+        expect(tile("Healthy")).toHaveTextContent("2");
+        expect(tile("Healthy")).toHaveTextContent("1 pending Warmbly Cloud");
+        expect(tile("Needs attention")).toHaveTextContent("1");
+    });
+
+    it("keeps a pending row saying so through a status refresh instead of a last reported issue", async () => {
+        await renderPage();
+        statusState.isFetching = true;
+        fireEvent.click(screen.getByRole("button", { name: "Mailbox" }));
+        expect(screen.queryAllByText("Last reported issue")).toHaveLength(0);
+        expect(within(rowOf(kavya.email)).getAllByText("Enrolling").length).toBeGreaterThan(0);
+        expect(within(rowOf(sara.email)).getAllByText("Cloud refused").length).toBeGreaterThan(0);
     });
 });

@@ -102,6 +102,14 @@ func room(capv, sentThis int) int {
 	return max(0, capv-sentThis)
 }
 
+// healthBand is the warmup band the row shows; a missing Cloud report is a state, not a band.
+func (d mailboxDay) healthBand() string {
+	if !d.health.known || d.health.cloudStatus || d.health.state == "" || d.health.state == models.WarmupHealthHealthy {
+		return ""
+	}
+	return string(d.health.state)
+}
+
 // planMailbox walks one mailbox through the day. windowSecondsLeft is the
 // campaign's sending time still ahead today; zero means the window is closed
 // for the rest of the day and the campaign-level clamp reports it instead.
@@ -153,6 +161,9 @@ func (s *schedulerService) planMailbox(ctx context.Context, pass *campaignPass, 
 			d.state = models.MailboxPlanAdmission
 		default:
 			d.state = models.MailboxPlanHealthHold
+			if gate.cloudStatus {
+				d.state = models.MailboxPlanCloudStatus
+			}
 		}
 		return d
 	}
@@ -475,7 +486,7 @@ func (s *schedulerService) PlanCampaignDay(ctx context.Context, campaignID uuid.
 		{kind: models.SendLimitCampaignDailyLimit}, {kind: models.SendLimitCampaignRamp},
 		{kind: models.SendLimitWarmupGraduation}, {kind: models.SendLimitWorkspaceRisk},
 		{kind: models.SendLimitDomainAuth}, {kind: models.SendLimitResting}, {kind: models.SendLimitHealthHold},
-		{kind: models.SendLimitRecovery}, {kind: models.SendLimitCooldown},
+		{kind: models.SendLimitCloudStatusHold}, {kind: models.SendLimitRecovery}, {kind: models.SendLimitCooldown},
 		{kind: models.SendLimitOtherCampaigns}, {kind: models.SendLimitHealthPace},
 		{kind: models.SendLimitMailboxHours}, {kind: models.SendLimitSendingBehavior}, {kind: models.SendLimitSpacing},
 	}
@@ -506,7 +517,11 @@ func (s *schedulerService) PlanCampaignDay(ctx context.Context, campaignID uuid.
 		case gateResting:
 			add(models.SendLimitResting, d.byGate)
 		case gateHealth:
-			add(models.SendLimitHealthHold, d.byGate)
+			if d.gate.cloudStatus {
+				add(models.SendLimitCloudStatusHold, d.byGate)
+			} else {
+				add(models.SendLimitHealthHold, d.byGate)
+			}
 		case gateRecovery, gateAdmission:
 			add(models.SendLimitRecovery, d.byGate)
 		case gateCooldown:
@@ -528,9 +543,7 @@ func (s *schedulerService) PlanCampaignDay(ctx context.Context, campaignID uuid.
 			t := d.reopensAt
 			mp.ReopensAt = &t
 		}
-		if d.health.known && d.health.state != "" && d.health.state != models.WarmupHealthHealthy {
-			mp.Health = string(d.health.state)
-		}
+		mp.Health = d.healthBand()
 		plan.Mailboxes = append(plan.Mailboxes, mp)
 	}
 	for _, t := range tallies {
@@ -691,7 +704,7 @@ func (s *schedulerService) prefillPool(ctx context.Context, pass *campaignPass, 
 	if s.warmupRepo != nil {
 		if states, err := s.warmupRepo.GetHealthStates(ctx, ids); err == nil {
 			for id, h := range states {
-				pass.health[id] = healthRead{state: h.State, blockedUntil: h.BlockedUntil, known: true}
+				pass.health[id] = healthRead{state: h.State, blockedUntil: h.BlockedUntil, known: true, cloudStatus: h.CloudStatusOnly, cloudMissing: h.CloudReportMissing}
 			}
 		}
 	}

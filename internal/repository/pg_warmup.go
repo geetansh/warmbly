@@ -156,8 +156,7 @@ type WarmupRepository interface {
 	// GetParticipantHealthForAccounts is the batched form: one pool row per
 	// mailbox in the set, keyed by account id.
 	GetParticipantHealthForAccounts(ctx context.Context, accountIDs []uuid.UUID) (map[uuid.UUID]*models.WarmupParticipantHealth, error)
-	// GetKnownHealthState is GetHealthState over real evidence only, plus
-	// whether Warmbly Cloud's evidence for the mailbox is unknown.
+	// GetKnownHealthState is GetHealthState over real evidence, plus whether Cloud's evidence is unknown.
 	GetKnownHealthState(ctx context.Context, accountID uuid.UUID) (models.WarmupHealthState, bool, error)
 	// GetCloudStanding is the standing Warmbly Cloud last reported for a
 	// mailbox it warms; nil for any other mailbox.
@@ -528,6 +527,10 @@ func (r *warmupRepository) BlockFromPool(ctx context.Context, accountID uuid.UUI
 type WarmupHealthRead struct {
 	State        models.WarmupHealthState
 	BlockedUntil *time.Time
+	// CloudStatusOnly: the hold is only a missing Warmbly Cloud report, with no real hold beside it.
+	CloudStatusOnly bool
+	// CloudReportMissing: Warmbly Cloud has no current report, so a hold has no end whatever BlockedUntil says.
+	CloudReportMissing bool
 }
 
 // IsPoolEligible checks current role, authority and health independently of price.
@@ -554,9 +557,9 @@ func (r *warmupRepository) GetHealthStates(ctx context.Context, accountIDs []uui
 		return out, nil
 	}
 	query := `
-		SELECT a.id, h.health_state, h.blocked_until
+		SELECT a.id, h.health_state, h.blocked_until, h.cloud_only, h.cloud_missing
 		  FROM unnest($1::uuid[]) AS a(id)
-		  CROSS JOIN LATERAL (` + warmupStandingSQL("a.id") + `
+		  CROSS JOIN LATERAL (` + warmupGateStandingSQL("a.id") + `
 		  ) h
 	`
 	rows, err := resultDB(ctx, r.db).Query(ctx, query, accountIDs)
@@ -568,10 +571,11 @@ func (r *warmupRepository) GetHealthStates(ctx context.Context, accountIDs []uui
 		var id uuid.UUID
 		var state string
 		var until *time.Time
-		if err := rows.Scan(&id, &state, &until); err != nil {
+		var cloudOnly, cloudMissing bool
+		if err := rows.Scan(&id, &state, &until, &cloudOnly, &cloudMissing); err != nil {
 			return nil, err
 		}
-		out[id] = WarmupHealthRead{State: models.WarmupHealthState(state), BlockedUntil: until}
+		out[id] = WarmupHealthRead{State: models.WarmupHealthState(state), BlockedUntil: until, CloudStatusOnly: cloudOnly, CloudReportMissing: cloudMissing}
 	}
 	return out, rows.Err()
 }
@@ -579,7 +583,7 @@ func (r *warmupRepository) GetHealthStates(ctx context.Context, accountIDs []uui
 // GetHealthState returns the account's warmup health state and blocked_until without the
 // caller naming a pool. The ordering keeps the worst state winning.
 func (r *warmupRepository) GetHealthState(ctx context.Context, accountID uuid.UUID) (models.WarmupHealthState, *time.Time, error) {
-	query := `SELECT health_state, blocked_until FROM (` + warmupStandingSQL("$1::uuid") + `
+	query := `SELECT health_state, blocked_until FROM (` + warmupGateStandingSQL("$1::uuid") + `
 	) h`
 	var state string
 	var blockedUntil *time.Time
@@ -710,15 +714,12 @@ func (r *warmupRepository) GetCloudStanding(ctx context.Context, accountID uuid.
 	if err != nil {
 		return nil, err
 	}
-	var state, reason string
-	var until *time.Time
-	if err := resultDB(ctx, r.db).QueryRow(ctx, `SELECT health_state, blocked_until, COALESCE(last_health_reason, '') FROM (`+warmupStandingSQL("$1")+`) standing`, accountID).Scan(&state, &until, &reason); err != nil {
+	var c cloudStatusRow
+	if err := resultDB(ctx, r.db).QueryRow(ctx, `SELECT `+cloudStatusSelect("$1::uuid")+`
+		  FROM (SELECT 1) one LEFT JOIN LATERAL (`+warmupKnownStandingSQL("$1::uuid")+`) k ON true`, accountID).Scan(c.dest()...); err != nil {
 		return nil, err
 	}
-	if state == string(models.WarmupHealthBlocked) && reason == models.WarmupReasonCloudEvidenceUnavailable {
-		return models.CloudStandingUnavailable(), nil
-	}
-	return m.Standing, nil
+	return c.status(m, time.Now()), nil
 }
 
 // GetParticipantHealthForAccount returns the participant row from whichever pool the mailbox

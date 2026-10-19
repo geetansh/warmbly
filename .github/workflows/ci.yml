@@ -267,6 +267,17 @@ jobs:
             grep -q -- "--- PASS: $test " campaign-pool-batch.log
           done
 
+      - name: Cloud standing and missing-evidence holds (PostgreSQL)
+        env:
+          WARMBLY_TEST_DB: postgres://warmbly:warmbly@127.0.0.1:5432/warmbly_test?sslmode=disable
+        run: |
+          set -o pipefail
+          go test -race -v -p 1 ./internal/repository -run '^TestLiveCloud' -count=1 | tee cloud-standing.log
+          if grep -q -- '--- SKIP:' cloud-standing.log; then exit 1; fi
+          for test in TestLiveCloudStandingFreshnessIsBoundedWithoutInventingAProviderBlock TestLiveCloudUnknownEvidenceDoesNotHideARealHold TestLiveCloudStaleLiveHoldStaysKnown TestLiveCloudPendingEnrollmentAndDisconnectAreUnknown; do
+            grep -q -- "--- PASS: $test " cloud-standing.log
+          done
+
       - name: Scheduled-job retirement regressions (PostgreSQL)
         env:
           WARMBLY_TEST_DB: postgres://warmbly:warmbly@127.0.0.1:5432/warmbly_test?sslmode=disable
@@ -461,6 +472,11 @@ jobs:
           WARMBLY_TEST_DB: postgres://warmbly:warmbly@127.0.0.1:5432/warmbly_test?sslmode=disable
         run: |
           go test -race -p 1 ./internal/repository ./internal/app/consumer ./internal/app/orgtransfer ./internal/infrastructure/db -run '^TestLive(SyncArrival|SyncTruth|EmailErrorDedupe|EmailErrorResolveMethod)' -count=1
+
+      - name: Workspace archive spec against the live schema (PostgreSQL)
+        env:
+          WARMBLY_TEST_DB: postgres://warmbly:warmbly@127.0.0.1:5432/warmbly_test?sslmode=disable
+        run: go test -race -v -p 1 ./internal/app/orgtransfer -run '^TestLive(EveryOrgTableIsRegistered|TablesAreInDependencyOrder|ResetColumnsHaveSomethingToFallBackOn)$' -count=1
 
       - name: Payload-free arrival delivery diagnostics regressions (PostgreSQL)
         env:

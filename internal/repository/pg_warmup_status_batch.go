@@ -100,33 +100,7 @@ func (r *warmupRepository) GetCloudStandings(ctx context.Context, accountIDs []u
 	if err := rows.Err(); err != nil || len(linked) == 0 {
 		return out, err
 	}
-	ids := make([]uuid.UUID, 0, len(linked))
-	for id := range linked {
-		ids = append(ids, id)
-	}
-	rows, err = resultDB(ctx, r.db).Query(ctx, `
-		SELECT a.id, h.health_state, h.blocked_until, COALESCE(h.last_health_reason, '')
-		  FROM unnest($1::uuid[]) AS a(id)
-		  CROSS JOIN LATERAL (`+warmupStandingSQL("a.id")+`
-		  ) h`, ids)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var id uuid.UUID
-		var state, reason string
-		var until *time.Time
-		if err := rows.Scan(&id, &state, &until, &reason); err != nil {
-			return nil, err
-		}
-		if state == string(models.WarmupHealthBlocked) && reason == models.WarmupReasonCloudEvidenceUnavailable {
-			out[id] = models.CloudStandingUnavailable()
-		} else if standing := linked[id].Standing; standing != nil {
-			out[id] = standing
-		}
-	}
-	return out, rows.Err()
+	return cloudStatuses(ctx, resultDB(ctx, r.db), linked)
 }
 
 // SpamPlacementsSinceForAccounts is SpamPlacementsSince over a set; every

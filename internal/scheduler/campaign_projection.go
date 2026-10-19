@@ -356,7 +356,9 @@ func (s *schedulerService) ProjectCampaign(ctx context.Context, in CampaignProje
 			p.held, p.state = true, models.EstimateSenderResting
 		case gateHealth:
 			p.held, p.state = true, models.EstimateSenderHealthHold
-			p.heldTill = h.blockedUntil
+			if !h.cloudMissing {
+				p.heldTill = h.blockedUntil
+			}
 		case gateNoWorker:
 			p.state = models.EstimateSenderNoWorker
 		case gateRecovery:
