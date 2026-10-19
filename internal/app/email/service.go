@@ -129,6 +129,8 @@ type EmailService interface {
 	WireCloudUnenroll(u CloudUnenroller)
 	// WireCloudCredentials hands Warmbly Cloud a mailbox's credential after it changes here.
 	WireCloudCredentials(r CloudCredentialRefresher)
+	// WireCloudWarmup relays warmup edits for Cloud-warmed mailboxes to Warmbly Cloud.
+	WireCloudWarmup(r CloudWarmupRelay)
 	// ConnectDelegated stores a Gmail or Outlook mailbox reached through an
 	// administrator's grant and loads it; tokens are minted per use.
 	ConnectDelegated(ctx context.Context, userID string, orgID *uuid.UUID, data models.NewDelegatedAccount) (*models.Email, *errx.Error)
@@ -200,6 +202,8 @@ type emailService struct {
 	cloudUnenroll CloudUnenroller
 	// cloudCredentials re-sends a changed credential to Warmbly Cloud.
 	cloudCredentials CloudCredentialRefresher
+	// cloudWarmup takes the warmup edits Warmbly Cloud owns for the mailboxes it warms.
+	cloudWarmup CloudWarmupRelay
 	// webhookService is optional. When non-nil, account lifecycle events
 	// (email_account.connected, email_account.removed) are dispatched to
 	// subscribed customer webhooks.

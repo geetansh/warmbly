@@ -8,19 +8,23 @@ import patchEmailLists from "./patchEmailLists";
 export const mailboxMutationKey = (id: string) => ["emails", id];
 
 // Optimistic: the switch, the rename and the tags show on the click; the reply replaces them.
-export default function useUpdateEmail(id: string) {
+// serverOwned fields are decided by the server, so they wait for its answer.
+export default function useUpdateEmail(id: string, serverOwned: readonly (keyof Inbox)[] = []) {
     const queryClient = useQueryClient();
     const mutationKey = [...mailboxMutationKey(id), "update"];
 
     return useMutation({
         mutationKey,
         mutationFn: (inbox: Partial<Inbox>) => updateEmail(id, inbox),
-        onMutate: (inbox) =>
-            patchQueries(
+        onMutate: (inbox) => {
+            const shown = { ...inbox };
+            for (const k of serverOwned) delete shown[k];
+            return patchQueries(
                 queryClient,
                 [["emails", "list"]],
-                updateEntity<Inbox>(id, (row) => ({ ...row, ...inbox, id })),
-            ),
+                updateEntity<Inbox>(id, (row) => ({ ...row, ...shown, id })),
+            );
+        },
         onError: (_err, _inbox, snapshot) => {
             restoreQueries(queryClient, snapshot);
             settle(queryClient, mailboxMutationKey(id), [["emails", "list"]]);

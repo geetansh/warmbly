@@ -210,6 +210,8 @@ Filter by provider to distinguish observations from gaps. Historical rescued cou
 
 Configured diagnostic targets start at 10/day and rise by one toward 40/day before other constraints. These are product pacing defaults, not universal safe volumes or readiness evidence.
 
+On a self-hosted instance, a mailbox warmed by Warmbly Cloud runs the ramp, hours and days Warmbly Cloud holds for it. The Warmup tab edits those through the cloud, and hides the content segment, placement, folder and retention, which only apply to warmup sent from your instance. See [warmup settings](/guides/warmbly-cloud/#warmup-settings).
+
 Four things shape the real daily number: sends are spread across your warmup hours with jitter, the target is capped by how many eligible partners exist, a mailbox whose health drops gets reduced volume and wider spacing until it recovers, and a recent spam placement holds the ramp where it is.
 
 The partner cap exists because a mailbox never writes to the same partner twice in a day. When it applies, the **Warmup** tab of the mailbox drawer says so: it shows the ramp's number next to how many partners are available to the mailbox today, and the target it reports is the lower of the two. The count can fall during the day as partners reach their daily limit, and it recovers the next day. The same tab names the pool the mailbox warms in.

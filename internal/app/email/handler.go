@@ -61,7 +61,15 @@ func (s *emailService) Update(ctx context.Context, orgID, userID, emailAccountID
 		}
 	}
 
+	relayed, xerr := s.relayCloudWarmup(ctx, orgID, emailAccountID, udata)
+	if xerr != nil {
+		return nil, xerr
+	}
 	account, err := s.emailRepository.Update(ctx, orgID, emailAccountID, udata)
+	if relayed && err == errx.ErrNotEnough {
+		// Everything in the patch was the cloud's; nothing is left to write here.
+		account, err = s.emailRepository.Get(ctx, orgID, emailAccountID)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -122,6 +130,13 @@ func (s *emailService) SetWarmupLifecycle(ctx context.Context, orgID, emailAccou
 					"This mailbox is a placement seed inbox, which never warms up. Remove it from the seed inboxes first.")
 			}
 		}
+	}
+	if account, handled, xerr := s.cloudLifecycle(ctx, orgID, emailAccountID, action); handled || xerr != nil {
+		if xerr != nil {
+			return nil, xerr
+		}
+		s.publishAccountEvent(ctx, pubsub.EventAccountSynced, account)
+		return account, nil
 	}
 	account, err := s.emailRepository.SetWarmupLifecycle(ctx, orgID, emailAccountID, action)
 	if err != nil {

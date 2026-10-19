@@ -72,7 +72,7 @@ A `data` array of mailbox objects plus a `pagination` envelope.
       "warmup_pool_type": "premium",
       "warmup_start_time": "09:00",
       "warmup_end_time": "17:00",
-      "warmup_days": 5,
+      "warmup_days": 31,
       "timezone": "America/New_York",
       "tags": ["outbound"],
       "created_at": "2026-05-19T18:00:00Z",
@@ -163,7 +163,7 @@ Auth: **Scope** `WRITE_EMAILS` · **Org permission** `manage_emails`
 | `warmup_tag` | string | no | Tag applied to warmup threads. |
 | `warmup_start_time` | string | no | Daily warmup window start, `HH:MM`. |
 | `warmup_end_time` | string | no | Daily warmup window end, `HH:MM`. |
-| `warmup_days` | integer | no | Number of active warmup days per week. |
+| `warmup_days` | integer | no | Weekdays warmup mail goes out, as a bitmask: 1 Monday, 2 Tuesday, 4 Wednesday, 8 Thursday, 16 Friday, 32 Saturday, 64 Sunday. 31 is Monday to Friday; 0 means every day. For a mailbox Warmbly Cloud warms, this and the other ramp and window fields are sent to Warmbly Cloud; see [warmup settings](/guides/warmbly-cloud/#warmup-settings). |
 | `warmup_placement` | string | no | Where warmup mail is filed in the mailbox itself: `folder` (default), `inbox`, or `archive`. See [Warmup](/guides/warmup/#in-your-mail-client). |
 | `warmup_folder` | string | no | Folder (Gmail label) warmup mail is filed into when `warmup_placement` is `folder`. Empty string means the instance default, `Warmbly`. No folder separators or control characters; 64 characters max. |
 | `warmup_retention_days` | integer | no | How many days warmup mail stays in this mailbox before Warmbly deletes it, wherever `warmup_placement` keeps it: `3` to `3650`, or `0` to follow the instance setting (30 days unless the operator changed it). |
