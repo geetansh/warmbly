@@ -345,14 +345,16 @@ type WarmupParticipantHealth struct {
 // returned by GetBanStatus so the dashboard can show why warmup is blocked and
 // whether the user can appeal.
 type WarmupBanStatus struct {
-	EmailAccountID uuid.UUID  `json:"email_account_id"`
-	Blocked        bool       `json:"blocked"`
-	HealthState    string     `json:"health_state"`
-	Reason         string     `json:"reason,omitempty"`
-	BlockedAt      *time.Time `json:"blocked_at,omitempty"`
-	BlockedUntil   *time.Time `json:"blocked_until,omitempty"`
-	CanAppeal      bool       `json:"can_appeal"`
-	PendingAppeal  bool       `json:"pending_appeal"`
+	EmailAccountID uuid.UUID `json:"email_account_id"`
+	// Source is "cloud" when Warmbly Cloud warms the mailbox and this is its standing there; appeals then go to Cloud.
+	Source        WarmupSource `json:"source"`
+	Blocked       bool         `json:"blocked"`
+	HealthState   string       `json:"health_state"`
+	Reason        string       `json:"reason,omitempty"`
+	BlockedAt     *time.Time   `json:"blocked_at,omitempty"`
+	BlockedUntil  *time.Time   `json:"blocked_until,omitempty"`
+	CanAppeal     bool         `json:"can_appeal"`
+	PendingAppeal bool         `json:"pending_appeal"`
 }
 
 type WarmupPoolHealthSummary struct {

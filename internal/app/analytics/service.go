@@ -378,9 +378,12 @@ func (s *analyticsService) assembleAccountStatus(ctx context.Context, email *mod
 	}
 	applyWarmupPlacement(&health, placement)
 
-	// Build warmup status if warmup has ever been enabled (active or paused).
+	// Build warmup status if warmup has ever been enabled (active or paused), or Warmbly Cloud warms the mailbox.
 	var warmupStatus *models.WarmupStatusInfo
-	if email.Warmup != nil {
+	effective := email.EffectiveWarmup()
+	if effective.Source == models.WarmupSourceCloud {
+		warmupStatus = cloudWarmupStatus(email, effective, reads.now)
+	} else if email.Warmup != nil {
 		target, hold := s.warmupTargetAndHold(ctx, email, warmupHealthState(warmupHealth), inCampaign, reads)
 		var limit *models.WarmupPartnerLimit
 		if withPartners {
@@ -390,6 +393,8 @@ func (s *analyticsService) assembleAccountStatus(ctx context.Context, email *mod
 			target = max(limit.Reachable, usage.WarmupSent)
 		}
 		warmupStatus = &models.WarmupStatusInfo{
+			Source:        effective.Source,
+			State:         effective.State,
 			Enabled:       true,
 			Paused:        email.WarmupPausedAt != nil,
 			PausedAt:      email.WarmupPausedAt,
@@ -957,6 +962,31 @@ func (s *analyticsService) CompareCampaigns(ctx context.Context, orgID uuid.UUID
 	}
 
 	return s.analyticsRepo.CompareCampaigns(ctx, orgID, campaignIDs, from, to)
+}
+
+// cloudWarmupStatus is the status of a mailbox Warmbly Cloud warms, from what it last reported; the ramp settings are mirrored locally.
+func cloudWarmupStatus(email *models.Email, effective models.EffectiveWarmup, now time.Time) *models.WarmupStatusInfo {
+	st := &models.WarmupStatusInfo{
+		Source:    effective.Source,
+		State:     effective.State,
+		Enabled:   effective.State == models.WarmupStateActive || effective.State == models.WarmupStatePaused,
+		Paused:    effective.State == models.WarmupStatePaused,
+		MaxVolume: email.WarmupMax,
+		ReplyRate: email.WarmupReplyRate,
+	}
+	if cw := email.CloudWarmup; cw != nil {
+		if cw.Volume != nil {
+			st.CurrentVolume = *cw.Volume
+		}
+		if cw.Target != nil {
+			st.TargetVolume = *cw.Target
+		}
+	}
+	if effective.StartedAt != nil {
+		st.StartedAt = *effective.StartedAt
+		st.DaysActive = max(0, int(now.Sub(*effective.StartedAt).Hours()/24))
+	}
+	return st
 }
 
 // coldRampNotice explains a graduation ceiling holding this mailbox below its

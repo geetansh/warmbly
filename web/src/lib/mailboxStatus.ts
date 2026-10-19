@@ -107,6 +107,10 @@ export function tallyMailboxes(
 // Account activity is not proof of deliverability or reputation readiness.
 export default function mailboxDisplayStatus(box: Inbox): MailboxDisplayStatus {
     if (box.status !== "active") return "inactive";
+    if (box.warmup_effective?.source === "cloud") {
+        const state = box.warmup_effective.state;
+        return state === "active" ? "warming" : state === "paused" ? "paused" : "healthy";
+    }
     if (box.test_mode !== "off" && box.warmup && (box.warmup_paused_at || !diagnosticSendingAllowed(box))) return "paused";
     if (diagnosticWarmupActive(box)) return "warming";
     return "healthy";

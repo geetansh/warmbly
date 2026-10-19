@@ -20,7 +20,7 @@ func (d Deps) registerMailboxTools(r *Registry) {
 
 	r.Register(Tool{
 		Name:        "get_mailbox",
-		Description: "Get one sender mailbox's full configuration (status, sending limits, warmup settings, signature).",
+		Description: "Get one sender mailbox's full configuration (status, sending limits, warmup settings, signature). warmup_effective says whether it is warming and who warms it (source local or cloud); warmup and warmup_paused_at cover only this instance's own warmup and are null for a mailbox Warmbly Cloud warms.",
 		InputSchema: objectSchema(map[string]any{
 			"email_account_id": strProp("The mailbox UUID (from list_mailboxes)."),
 		}, "email_account_id"),
@@ -58,7 +58,7 @@ func (d Deps) registerMailboxTools(r *Registry) {
 
 	r.Register(Tool{
 		Name:        "set_mailbox_warmup",
-		Description: "Start, pause, resume, or stop warmup on a mailbox. start/resume preserve ramp progress; stop disables warmup.",
+		Description: "Start, pause, resume, or stop warmup on a mailbox. start/resume preserve ramp progress; stop disables warmup. For a mailbox Warmbly Cloud warms, start and resume resume it there and stop is refused.",
 		InputSchema: objectSchema(map[string]any{
 			"email_account_id": strProp("The mailbox UUID."),
 			"action":           enumProp("Warmup lifecycle action.", "start", "pause", "resume", "stop"),
@@ -99,7 +99,7 @@ func (d Deps) registerMailboxTools(r *Registry) {
 
 	r.Register(Tool{
 		Name:        "get_warmup_ban_status",
-		Description: "Read a mailbox's warmup pool standing (healthy, watched, throttled, quarantined, or blocked) and any ban reason.",
+		Description: "Read a mailbox's warmup pool standing (healthy, watched, throttled, quarantined, or blocked) and any ban reason. source is cloud when the standing is the one Warmbly Cloud reported.",
 		InputSchema: objectSchema(map[string]any{
 			"email_account_id": strProp("The mailbox UUID."),
 		}, "email_account_id"),
@@ -233,7 +233,7 @@ func (d Deps) setMailboxWarmup(ctx context.Context, inv Invocation, args json.Ra
 	if xerr != nil {
 		return "", fromErrx(xerr)
 	}
-	if in.Action == "start" || in.Action == "resume" {
+	if (in.Action == "start" || in.Action == "resume") && (mb == nil || !mb.CloudWarmup.Warms()) {
 		d.seedWarmup(ctx, aid)
 	}
 	d.logAudit(ctx, inv, action, models.AuditEntityEmailAccount, &aid, map[string]string{"warmup": in.Action})

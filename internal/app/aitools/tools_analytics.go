@@ -25,7 +25,7 @@ func (d Deps) registerAnalyticsTools(r *Registry) {
 
 	r.Register(Tool{
 		Name:            "list_mailboxes",
-		Description:     "List the org's sender mailboxes with status, health score, daily usage, warmup state, and any current errors. Use this for deliverability, warmup, and \"which mailbox is unhealthy\" questions.",
+		Description:     "List the org's sender mailboxes with status, health score, daily usage, warmup state, and any current errors. warmup.source is local or cloud (Warmbly Cloud warms it) and warmup.state is active, paused, off or unknown; a mailbox with no warmup key has warmup off. Use this for deliverability, warmup, and \"which mailbox is unhealthy\" questions.",
 		InputSchema:     objectSchema(map[string]any{}),
 		Risk:            generation.RiskRead,
 		RequiredOrgPerm: models.PermViewAnalytics,

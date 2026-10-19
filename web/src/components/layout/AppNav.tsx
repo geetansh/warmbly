@@ -56,6 +56,7 @@ import useTemplates from "@/lib/api/hooks/app/templates/useTemplates";
 import useUsageOverview from "@/lib/api/hooks/app/analytics/useUsageOverview";
 import useDashboard from "@/lib/api/hooks/app/analytics/useDashboard";
 import mailboxDisplayStatus from "@/lib/mailboxStatus";
+import { diagnosticWarmupActive } from "@/lib/diagnosticParticipation";
 import useAPIKeys from "@/lib/api/hooks/app/api-keys/useAPIKeys";
 import useIntegrationConnections from "@/lib/api/hooks/app/integrations/useIntegrationConnections";
 import AnimatedNumber from "@/components/ui/AnimatedNumber";
@@ -574,13 +575,13 @@ function CampaignActivity() {
 
 // MailboxActivity is the Accounts-row indicator — deliberately a DIFFERENT
 // motif than the campaigns dot-grid: a flickering flame + count of mailboxes
-// warming up right now (warmup enabled and not paused). Hidden when none are
+// warming up right now, here or in Warmbly Cloud. Hidden when none are
 // warming. Counts come from the shared emails-list cache, which the realtime
 // layer invalidates on account/warmup events, so it stays live.
 function MailboxActivity() {
     const { emails } = useEmails({ query: "", tag: "" });
     const warming = useMemo(
-        () => emails.filter((e) => !!e.warmup && !e.warmup_paused_at).length,
+        () => emails.filter(diagnosticWarmupActive).length,
         [emails],
     );
     return (

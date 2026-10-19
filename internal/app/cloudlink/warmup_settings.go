@@ -27,15 +27,22 @@ func (s *service) OnSettingsChange(fn func(context.Context, []uuid.UUID)) {
 	s.settingsChanged = fn
 }
 
-// mirror writes the cloud's reported settings onto the local columns and announces the mailboxes that changed.
-func (s *service) mirror(ctx context.Context, observedAt time.Time, settings map[uuid.UUID]models.PoolLinkWarmupSettings) ([]uuid.UUID, error) {
-	r, ok := s.repo.(repository.CloudWarmupMirrorRepository)
-	if !ok || len(settings) == 0 {
-		return nil, nil
+// mirror writes the cloud's reported settings and warmup state locally and announces the mailboxes that changed.
+func (s *service) mirror(ctx context.Context, observedAt time.Time, settings map[uuid.UUID]models.PoolLinkWarmupSettings, warmup map[uuid.UUID]models.CloudWarmupObserved) ([]uuid.UUID, error) {
+	var changed []uuid.UUID
+	if r, ok := s.repo.(repository.CloudWarmupMirrorRepository); ok && len(settings) > 0 {
+		ids, err := r.MirrorCloudWarmupSettings(ctx, observedAt, settings)
+		if err != nil {
+			return nil, err
+		}
+		changed = ids
 	}
-	changed, err := r.MirrorCloudWarmupSettings(ctx, observedAt, settings)
-	if err != nil {
-		return nil, err
+	if r, ok := s.repo.(repository.CloudWarmupStateRepository); ok && len(warmup) > 0 {
+		ids, err := r.MirrorCloudWarmupState(ctx, observedAt, warmup)
+		if err != nil {
+			return nil, err
+		}
+		changed = appendNew(changed, ids)
 	}
 	if len(changed) > 0 && s.settingsChanged != nil {
 		s.settingsChanged(ctx, changed)
@@ -43,12 +50,40 @@ func (s *service) mirror(ctx context.Context, observedAt time.Time, settings map
 	return changed, nil
 }
 
+func appendNew(into, ids []uuid.UUID) []uuid.UUID {
+	seen := make(map[uuid.UUID]bool, len(into))
+	for _, id := range into {
+		seen[id] = true
+	}
+	for _, id := range ids {
+		if !seen[id] {
+			seen[id] = true
+			into = append(into, id)
+		}
+	}
+	return into
+}
+
+// forgetWarmup marks a mailbox the cloud did not list as unreported, never as off.
+func (s *service) forgetWarmup(ctx context.Context, accountID uuid.UUID) {
+	if r, ok := s.repo.(repository.CloudWarmupStateRepository); ok {
+		if err := r.ForgetCloudWarmupState(ctx, accountID); err != nil {
+			log.Warn().Err(err).Str("account_id", accountID.String()).Msg("cloud link: warmup state could not be cleared")
+		}
+	}
+}
+
 // mirrorReported mirrors one state the cloud just returned; a failure leaves the next sync to repair it.
 func (s *service) mirrorReported(ctx context.Context, accountID uuid.UUID, state *models.PoolLinkMailboxState) {
-	if state == nil || !state.Settings.Reported() {
+	if state == nil {
 		return
 	}
-	if _, err := s.mirror(ctx, time.Now(), map[uuid.UUID]models.PoolLinkWarmupSettings{accountID: state.Settings}); err != nil {
+	var settings map[uuid.UUID]models.PoolLinkWarmupSettings
+	if state.Settings.Reported() {
+		settings = map[uuid.UUID]models.PoolLinkWarmupSettings{accountID: state.Settings}
+	}
+	warmup := map[uuid.UUID]models.CloudWarmupObserved{accountID: state.CloudWarmupObserved()}
+	if _, err := s.mirror(ctx, time.Now(), settings, warmup); err != nil {
 		log.Warn().Err(err).Str("account_id", accountID.String()).Msg("cloud link: warmup settings could not be mirrored")
 	}
 }
@@ -129,7 +164,8 @@ func (s *service) RelayWarmupSettings(ctx context.Context, orgID, accountID uuid
 	if !state.Settings.Reported() {
 		return nil, errSettingsUnreported
 	}
-	if _, err := s.mirror(ctx, observedAt, map[uuid.UUID]models.PoolLinkWarmupSettings{accountID: state.Settings}); err != nil {
+	warmup := map[uuid.UUID]models.CloudWarmupObserved{accountID: state.CloudWarmupObserved()}
+	if _, err := s.mirror(ctx, observedAt, map[uuid.UUID]models.PoolLinkWarmupSettings{accountID: state.Settings}, warmup); err != nil {
 		log.Error().Err(err).Str("account_id", accountID.String()).Msg("cloud link: warmup settings applied on the cloud but not mirrored")
 		return nil, errx.InternalError()
 	}
@@ -171,15 +207,24 @@ func (s *service) SyncWarmupSettings(ctx context.Context) ([]uuid.UUID, *errx.Er
 			byRemote[states[j].RemoteID] = &states[j]
 		}
 		reported := map[uuid.UUID]models.PoolLinkWarmupSettings{}
+		warmup := map[uuid.UUID]models.CloudWarmupObserved{}
 		for _, m := range group {
 			state := byRemote[m.RemoteID]
-			if m.EnrollmentState == "pending_remove" || state == nil || !state.Settings.Reported() {
+			if m.EnrollmentState == "pending_remove" {
+				continue
+			}
+			if state == nil {
+				s.forgetWarmup(ctx, m.EmailAccountID)
+				continue
+			}
+			warmup[m.EmailAccountID] = state.CloudWarmupObserved()
+			if !state.Settings.Reported() {
 				continue
 			}
 			reported[m.EmailAccountID] = state.Settings
 			s.pushTimezone(ctx, l, m, state.Settings.Timezone)
 		}
-		ids, err := s.mirror(ctx, observedAt, reported)
+		ids, err := s.mirror(ctx, observedAt, reported, warmup)
 		if err != nil {
 			log.Warn().Err(err).Str("instance_id", l.InstanceID.String()).Msg("cloud link: warmup settings could not be mirrored")
 			lastErr = errx.InternalError()

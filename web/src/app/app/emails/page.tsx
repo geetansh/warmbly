@@ -13,7 +13,7 @@ import useEmails from "@/lib/api/hooks/app/emails/useEmails";
 import { NoAccess } from "@/components/layout/NoAccess";
 import { usePermission } from "@/hooks/usePermission";
 import useWarmupLifecycle from "@/lib/api/hooks/app/emails/useWarmupLifecycle";
-import { diagnosticSendingAllowed, diagnosticWarmupActive } from "@/lib/diagnosticParticipation";
+import { diagnosticSendingAllowed, diagnosticWarmupActive, effectiveWarmupState } from "@/lib/diagnosticParticipation";
 import useAccountStatuses from "@/lib/api/hooks/app/analytics/useAccountStatuses";
 import useFeatureStatus from "@/lib/api/hooks/app/subscription/useFeatureStatus";
 import warmupLifecycle from "@/lib/api/client/app/emails/warmupLifecycle";
@@ -1491,7 +1491,7 @@ function MailboxStatusPill({ box, status, historicalIssue, warming, cloudGap, co
             ? "warming up"
             : inCampaign && diagnosticSendingAllowed(box)
               ? "low-volume diagnostic health checks are enabled"
-              : box.warmup && box.warmup_paused_at
+              : effectiveWarmupState(box) === "paused"
                 ? "warmup paused"
                 : "warmup off",
     ].join(", ");

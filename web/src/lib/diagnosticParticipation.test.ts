@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type Inbox from "@/lib/api/models/app/emails/Inbox";
-import { diagnosticSendingAllowed, diagnosticWarmupActive } from "./diagnosticParticipation";
+import { diagnosticSendingAllowed, diagnosticWarmupActive, effectiveWarmupState } from "./diagnosticParticipation";
 import mailboxDisplayStatus from "./mailboxStatus";
 import { cloudWarmupPaused } from "./cloudWarmup";
 import type { PoolLinkMailboxState } from "@/lib/api/models/app/cloudlink/CloudLink";
@@ -29,5 +29,25 @@ describe("consent-aware mailbox activity", () => {
         expect(cloudWarmupPaused(old)).toBe(false);
         expect(cloudWarmupPaused({ ...old, participation: { mode: "off", send: false, receive: false } })).toBe(true);
         expect(cloudWarmupPaused({ ...old, participation: { mode: "diagnostic", send: false, receive: true } })).toBe(true);
+    });
+
+    // Warmbly Cloud warms these while the local warmup column stays null; the server's warmup_effective says so.
+    it("reads a Cloud-warmed mailbox from warmup_effective, not the null local column", () => {
+        const cloud = { status: "active", warmup: null, warmup_paused_at: null, test_mode: null } as Inbox;
+        const active = { ...cloud, warmup_effective: { source: "cloud", state: "active" } } as Inbox;
+        const paused = { ...cloud, warmup_effective: { source: "cloud", state: "paused" } } as Inbox;
+        const unknown = { ...cloud, warmup_effective: { source: "cloud", state: "unknown" } } as Inbox;
+        expect(diagnosticWarmupActive(active)).toBe(true);
+        expect(mailboxDisplayStatus(active)).toBe("warming");
+        expect(effectiveWarmupState(paused)).toBe("paused");
+        expect(mailboxDisplayStatus(paused)).toBe("paused");
+        expect(diagnosticWarmupActive(unknown)).toBe(false);
+        expect(mailboxDisplayStatus(unknown)).not.toBe("warming");
+    });
+
+    it("falls back to the local columns on a server that sends no warmup_effective", () => {
+        expect(effectiveWarmupState(legacy)).toBe("active");
+        expect(effectiveWarmupState({ ...legacy, warmup_paused_at: new Date() } as Inbox)).toBe("paused");
+        expect(effectiveWarmupState({ ...legacy, warmup: null } as Inbox)).toBe("off");
     });
 });

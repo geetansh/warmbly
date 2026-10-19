@@ -11,6 +11,7 @@ export function cloudSendFailure(state?: PoolLinkMailboxState | null): WarmupSen
 }
 
 // Not warming on the cloud: paused, or reported with warmup never started there. Resume starts either.
+// Twin of PoolLinkMailboxState.CloudWarmupState in internal/models/effective_warmup.go; keep the two rules equal.
 export function cloudWarmupPaused(state?: PoolLinkMailboxState | null): boolean {
     return !!state && (!state.warmup || state.warmup.paused || !!state.participation && (state.participation.mode === "off" || !state.participation.send));
 }
