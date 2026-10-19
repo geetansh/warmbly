@@ -192,3 +192,33 @@ export function rateSentence(rate: PlacementRate): string {
     }
     return `${fmtNum(ok)} of ${fmtNum(rate.delivered)} warmup emails at Google, Microsoft and Yahoo reached the inbox over the last ${rate.window_days} days.`;
 }
+
+/** Sort key for spam at the major providers: share first, count breaking ties; -1 with no receipts. */
+export function spamSortValue(rate?: PlacementRate | null): number {
+    if (!rate || rate.delivered === 0) return -1;
+    return rate.spam / rate.delivered + rate.spam / 1e6;
+}
+
+export interface DomainSpam {
+    domain: string;
+    spam: number;
+    delivered: number;
+    mailboxes: number;
+}
+
+/** Major-provider spam rolled up by sending domain, worst first; only domains with spam. */
+export function spamByDomain(rows: { email: string; rate?: PlacementRate | null }[]): DomainSpam[] {
+    const byDomain = new Map<string, DomainSpam>();
+    for (const { email, rate } of rows) {
+        const domain = email.split("@")[1]?.toLowerCase();
+        if (!domain || !rate || rate.delivered === 0) continue;
+        const d = byDomain.get(domain) ?? { domain, spam: 0, delivered: 0, mailboxes: 0 };
+        d.spam += rate.spam;
+        d.delivered += rate.delivered;
+        if (rate.spam > 0) d.mailboxes += 1;
+        byDomain.set(domain, d);
+    }
+    return [...byDomain.values()]
+        .filter((d) => d.spam > 0)
+        .sort((a, b) => b.spam / b.delivered - a.spam / a.delivered || b.spam - a.spam || a.domain.localeCompare(b.domain));
+}

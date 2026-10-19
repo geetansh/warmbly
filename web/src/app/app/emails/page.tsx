@@ -34,7 +34,9 @@ import useAuthConfig from "@/lib/api/hooks/auth/useAuthConfig";
 import { useEnrollCloudLinkMailbox, useUnenrollCloudLinkMailbox, useCloudLinkMailboxLifecycle } from "@/lib/api/hooks/app/cloudlink/useCloudLink";
 import { providerSupported } from "@/app/app/settings/warmbly-cloud/providers";
 import { CloudIcon, MailCheckIcon } from "lucide-react";
-import { PlacementRateBadge } from "@/components/app/placement/PlacementCharts";
+import { PlacementRateBadge, SpamCountBadge } from "@/components/app/placement/PlacementCharts";
+import { spamSortValue } from "@/components/app/placement/placement";
+import SpamByDomainStrip from "@/components/app/placement/SpamByDomainStrip";
 import type { CloudLinkMailboxRow } from "@/lib/api/models/app/cloudlink/CloudLink";
 import { cloudSendFailure, cloudWarmupPaused } from "@/lib/cloudWarmup";
 import buildError from "@/lib/helper/buildError";
@@ -400,6 +402,11 @@ export default function AddressesPage() {
             : false;
     }
 
+    const spamRows = useMemo(
+        () => (emailsData.emails ?? []).map((e) => ({ email: e.email, rate: statusById.get(e.id)?.warmup_placement })),
+        [emailsData.emails, statusById],
+    );
+
     // Every mailbox page is loaded, so the headers sort in the browser.
     const [sort, setSort] = useBrowseState<MailboxSort | null>("emails.sort", null, mailboxSort);
     const sortBy = (col: MailboxColumn) =>
@@ -503,6 +510,7 @@ export default function AddressesPage() {
                     sit evenly and the whole block collapses when all are empty. */}
                 <div className="px-5 py-3 flex flex-col gap-2 empty:hidden">
                     <AdvisorSummaryBar surface="emails" noun="mailbox" nounPlural="mailboxes" />
+                    <SpamByDomainStrip rows={spamRows} query={query} onQuery={setQuery} />
                     <SigninMigrationBanner total={migration.data?.total ?? 0} onOpen={() => openMigration()} />
                     <CloudPoolBanner onConnect={() => setCloudDialog(true)} mailboxCount={stats.total} />
                     {!emailsData.isLoading && <CloudPathsPanel mailboxCount={stats.total} onAdd={() => p?.setAddEmail(true)} />}
@@ -1090,6 +1098,10 @@ function MailboxRow({
                                 <span className="text-[10.5px] text-slate-400">Inbox</span>
                                 <PlacementRateBadge rate={status?.warmup_placement} />
                             </span>
+                            <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+                                <span className="text-[10.5px] text-slate-400">Spam</span>
+                                <SpamCountBadge rate={status?.warmup_placement} />
+                            </span>
                             <span className="inline-flex items-center gap-1.5 whitespace-nowrap" title={gapOnly ? gapCopy?.title : status?.health ? tone.label : undefined}>
                                 <span className="text-[10.5px] text-slate-400">Health</span>
                                 <span className={`inline-flex items-center gap-1 font-mono text-[11.5px] font-medium tabular-nums ${healthShown.text}`}>
@@ -1136,6 +1148,16 @@ function MailboxRow({
                 >
                     <MailCheckIcon className="w-3 h-3 shrink-0 text-slate-400" />
                     <PlacementRateBadge rate={status?.warmup_placement} />
+                </button>
+            </td>
+            <td className={`px-3 ${colShow("spam")}`}>
+                <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); onOpen(box.id, "deliverability"); }}
+                    aria-label="View where warmup mail landed in spam"
+                    className="inline-flex items-center"
+                >
+                    <SpamCountBadge rate={status?.warmup_placement} />
                 </button>
             </td>
             <td className={`px-3 overflow-hidden ${colShow("health")}`}>
@@ -1293,7 +1315,7 @@ function warmupErrorMessage(e: AppError | null | undefined): string {
 
 /* ── columns ─────────────────────────────────────── */
 
-type MailboxColumnId = "mailbox" | "status" | "sent" | "warmup" | "inbox" | "health";
+type MailboxColumnId = "mailbox" | "status" | "sent" | "warmup" | "inbox" | "spam" | "health";
 
 interface MailboxColumn {
     id: MailboxColumnId;
@@ -1362,6 +1384,20 @@ const MAILBOX_COLUMNS: MailboxColumn[] = [
         className: "w-24",
         show: "hidden @2xl:table-cell",
         sortValue: (_, s) => s?.warmup_placement?.inbox_rate ?? -1,
+    },
+    {
+        id: "spam",
+        label: "Spam",
+        header: (
+            <InfoHeader
+                label="Spam"
+                title="Warmup emails that landed in spam at Google, Microsoft and Yahoo, out of those classified, over the last 7 days. Shown from the first receipt, before an inbox rate is. Sort to put the worst first."
+                aria="How spam is counted"
+            />
+        ),
+        className: "w-20",
+        show: "hidden @2xl:table-cell",
+        sortValue: (_, s) => spamSortValue(s?.warmup_placement),
     },
     {
         id: "health",
