@@ -35,7 +35,28 @@ func (s *analyticsService) placementRates(ctx context.Context, orgID uuid.UUID, 
 	if err != nil {
 		return nil
 	}
-	return headlineRates(windows)
+	return headlineRates(s.withCloudWindows(ctx, orgID, emailID, windows))
+}
+
+// cloudRatesTimeout bounds the Cloud read behind a status list, which falls back to local windows.
+const cloudRatesTimeout = 4 * time.Second
+
+// withCloudWindows adds Cloud-warmed mailboxes' windows, so the list rate matches the placement report.
+func (s *analyticsService) withCloudWindows(ctx context.Context, orgID uuid.UUID, emailID *uuid.UUID, windows map[uuid.UUID]models.WarmupPlacementWindow) map[uuid.UUID]models.WarmupPlacementWindow {
+	if s.cloudReports == nil {
+		return windows
+	}
+	ctx, cancel := context.WithTimeout(ctx, cloudRatesTimeout)
+	defer cancel()
+	today := time.Now().UTC()
+	cloud, xerr := s.cloudReports.WarmupPlacementData(ctx, orgID, emailID, today, today)
+	if xerr != nil || cloud == nil {
+		return windows
+	}
+	data := &models.WarmupPlacementData{}
+	data.Add(&models.WarmupPlacementData{Windows: windows})
+	data.Add(&models.WarmupPlacementData{Windows: cloud.Windows})
+	return data.Windows
 }
 
 // headlineRates is each mailbox's headline, over the major providers.

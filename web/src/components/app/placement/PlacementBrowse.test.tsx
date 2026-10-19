@@ -38,3 +38,26 @@ describe("provider expansion browse persistence", () => {
         expect(screen.getByRole("button")).toHaveAttribute("aria-expanded", "false");
     });
 });
+
+describe("provider breakdown host split", () => {
+    beforeEach(() => {
+        sessionStorage.clear();
+        useAppStore.setState({ currentOrganization: { id: "workspace", name: "Workspace", role: "owner" } });
+    });
+
+    it("labels a combined group and counts each host against the group's receipts", () => {
+        const google: PlacementProvider = {
+            sent: 5, delivered: 5, inbox: 3, tabs: 0, spam: 2, rescued: 0, unconfirmed: 0, inbox_rate: 60, spam_rate: 40, group: "google",
+            hosts: [
+                { sent: 3, delivered: 3, inbox: 3, tabs: 0, spam: 0, rescued: 0, unconfirmed: 0, inbox_rate: 100, spam_rate: 0, host: "google_workspace" },
+                { sent: 2, delivered: 2, inbox: 0, tabs: 0, spam: 2, rescued: 0, unconfirmed: 0, inbox_rate: 0, spam_rate: 100, host: "gmail" },
+            ],
+        };
+        const profile = { user: { id: "account-user" } } as ComponentProps<typeof UserContext.Provider>["value"];
+        render(<UserContext.Provider value={profile}><ProviderBreakdown browseScope="emails.mailbox.split.placement" providers={[google]} /></UserContext.Provider>);
+        expect(screen.getByText("2 hosts combined")).toBeInTheDocument();
+        fireEvent.click(screen.getByRole("button"));
+        expect(screen.getByText("3/5")).toBeInTheDocument();
+        expect(screen.getByText("2/5")).toBeInTheDocument();
+    });
+});
